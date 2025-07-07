@@ -1,0 +1,121 @@
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
+import { toast } from 'sonner';
+
+
+type Exercise = {
+  exercise_name: string;
+  sets: number;
+  reps: number;
+  weight: number;
+};
+
+type WorkoutPlan = {
+  date: string; // or Date if your API returns a Date object
+  exercises: Exercise[];
+};
+
+
+export default function WorkoutGenerator() {
+  const [message, setMessage] = useState('');
+  const [workoutPlan, setWorkoutPlan] = useState<WorkoutPlan | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const navigate = useNavigate();
+
+  // Check for token on component mount
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      toast.error('Please log in to generate a workout plan');
+      navigate('/login');
+    }
+  }, [navigate]);
+
+  const handleSendMessage = async () => {
+    if (!message.trim()) {
+      toast.error('Please enter your workout preferences');
+      return;
+    }
+
+    const token = localStorage.getItem('token');
+    if (!token) {
+      toast.error('Session expired. Please log in again.');
+      navigate('/login');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const response = await axios.post(
+        `${import.meta.env.VITE_API_URL}/api/workout-plans`,
+        { prompt: message },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      setWorkoutPlan(response.data.workoutPlan);
+      toast.success('Workout plan generated successfully!');
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error)) {
+        console.error('Error generating workout:', error);
+
+        if (error.response?.status === 401) {
+          toast.error('Session expired. Please log in again.');
+          localStorage.removeItem('token');
+          navigate('/login');
+        } else {
+          toast.error('Failed to generate workout plan. Please try again.');
+        }
+      } else {
+        console.error('Unknown error', error);
+        toast.error('An unexpected error occurred.');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 to-gray-800 p-4">
+      <div className="w-full max-w-md">
+        <div className="bg-gray-900/80 backdrop-blur-sm shadow-xl border-gray-700 rounded-lg p-6">
+          <h1 className="text-2xl font-bold text-white mb-4 text-center">Workout Generator</h1>
+          <textarea
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            placeholder="Enter your workout preferences (e.g., 'I want a chest workout with 3 exercises')"
+            className="w-full h-32 p-3 bg-gray-800 border-gray-700 text-white rounded-md focus:ring-primary focus:border-primary"
+          />
+          <button
+            onClick={handleSendMessage}
+            disabled={isLoading}
+            className="w-full mt-4 bg-primary hover:bg-primary/90 text-white font-bold py-2 px-4 rounded transition-colors"
+          >
+            {isLoading ? 'Generating...' : 'Generate Workout'}
+          </button>
+          {workoutPlan && (
+            <div className="mt-6">
+              <h2 className="text-xl font-bold text-white mb-2">Your Workout Plan</h2>
+              <div className="bg-gray-800 p-4 rounded-md">
+                <p className="text-gray-300">Date: {workoutPlan.date}</p>
+                <h3 className="text-lg font-semibold text-white mt-2">Exercises:</h3>
+                <ul className="list-disc list-inside text-gray-300">
+                  {workoutPlan.exercises.map((exercise: Exercise, index: number) => (
+                    <li key={index}>
+                      {exercise.exercise_name}: {exercise.sets} sets x {exercise.reps} reps @ {exercise.weight} lbs
+                    </li>
+                  ))}
+
+                </ul>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

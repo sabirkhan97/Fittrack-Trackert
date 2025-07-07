@@ -1,0 +1,124 @@
+import { useState, useEffect } from 'react';
+import { Button, Form, Input, InputNumber, DatePicker, Table, message } from 'antd';
+import axios from 'axios';
+import moment from 'moment';
+import { useNavigate } from 'react-router-dom';
+
+const GymNotes = () => {
+  const [form] = Form.useForm();
+  const [exercises, setExercises] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    fetchExercises();
+  }, []);
+
+  const fetchExercises = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        message.error('Please login');
+        navigate('/login');
+        return;
+      }
+      const response = await axios.get(`${import.meta.env.VITE_API_URL}/exercises`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setExercises(response.data);
+    } catch (error) {
+      message.error('Failed to fetch exercises');
+    }
+  };
+
+  const onFinish = async (values: any) => {
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(
+        `${import.meta.env.VITE_API_URL}/exercises`,
+        {
+          exercise_name: values.exercise_name,
+          sets: values.sets,
+          reps: values.reps,
+          weight: values.weight,
+          exercise_date: values.exercise_date.format('YYYY-MM-DD'),
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      message.success('Exercise added!');
+      form.resetFields();
+      fetchExercises();
+    } catch (error) {
+      message.error('Failed to add exercise');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const columns = [
+    { title: 'Exercise', dataIndex: 'exercise_name', key: 'exercise_name' },
+    { title: 'Sets', dataIndex: 'sets', key: 'sets' },
+    { title: 'Reps', dataIndex: 'reps', key: 'reps' },
+    {
+      title: 'Weight (kg)',
+      dataIndex: 'weight',
+      key: 'weight',
+      render: (weight: number) => weight || '-',
+    },
+    {
+      title: 'Date',
+      dataIndex: 'exercise_date',
+      key: 'exercise_date',
+      render: (date: string) => moment(date).format('MMM D, YYYY'),
+    },
+  ];
+
+  return (
+    <div className="p-8 max-w-4xl mx-auto">
+      <h2 className="text-2xl font-bold mb-6">Gym Notes</h2>
+      <Button
+        onClick={() => {
+          localStorage.removeItem('token');
+          navigate('/login');
+        }}
+        className="mb-4"
+      >
+        Logout
+      </Button>
+      <Form form={form} onFinish={onFinish} layout="vertical">
+        <Form.Item
+          name="exercise_name"
+          label="Exercise Name"
+          rules={[{ required: true, message: 'Please enter exercise name' }]}
+        >
+          <Input placeholder="e.g., Bench Press" />
+        </Form.Item>
+        <Form.Item name="sets" label="Sets" rules={[{ required: true, message: 'Please enter sets' }]}>
+          <InputNumber min={1} placeholder="e.g., 3" />
+        </Form.Item>
+        <Form.Item name="reps" label="Reps" rules={[{ required: true, message: 'Please enter reps' }]}>
+          <InputNumber min={1} placeholder="e.g., 10" />
+        </Form.Item>
+        <Form.Item name="weight" label="Weight (kg)">
+          <InputNumber min={0} placeholder="e.g., 50" />
+        </Form.Item>
+        <Form.Item
+          name="exercise_date"
+          label="Date"
+          rules={[{ required: true, message: 'Please select date' }]}
+        >
+          <DatePicker format="YYYY-MM-DD" />
+        </Form.Item>
+        <Form.Item>
+          <Button type="primary" htmlType="submit" loading={loading}>
+            Add Exercise
+          </Button>
+        </Form.Item>
+      </Form>
+      <Table dataSource={exercises} columns={columns} rowKey="id" className="mt-6" />
+    </div>
+  );
+};
+
+export default GymNotes;

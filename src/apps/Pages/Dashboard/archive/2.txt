@@ -1,0 +1,332 @@
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
+import { Layout, Menu, Card, Row, Col, Statistic, Spin, Typography, Button, Table, Select, DatePicker, Switch } from 'antd';
+import { HomeOutlined, PlusOutlined, BarChartOutlined, LogoutOutlined } from '@ant-design/icons';
+import { toast } from 'sonner';
+import { format, formatDistanceToNow } from 'date-fns';
+import { useState } from 'react';
+import dayjs, { Dayjs } from 'dayjs';
+import { motion } from 'framer-motion';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+
+const { Header, Sider, Content } = Layout;
+const { Title, Text } = Typography;
+const { RangePicker } = DatePicker;
+const { Option } = Select;
+
+interface Workout {
+  _id: string;
+  exercise_name: string;
+  sets: number;
+  reps: number;
+  weight?: number;
+  exercise_date: string;
+  workout_type?: string;
+  muscle_group?: string;
+  duration?: number;
+}
+
+interface DashboardData {
+  metrics: {
+    totalWorkouts: number;
+    totalSets: number;
+    totalReps: number;
+    averageWeight: number | null;
+    totalDuration: number;
+  };
+  weeklyMetrics: {
+    totalWorkouts: number;
+    totalSets: number;
+    totalWeight: number;
+  };
+  monthlyMetrics: {
+    totalWorkouts: number;
+    totalSets: number;
+    totalWeight: number;
+  };
+  weightProgression: { date: string; weight: number }[];
+  workoutFrequency: { date: string; types: { type: string; count: number }[] }[];
+  recentWorkouts: Workout[];
+  exercises: string[];
+}
+
+export default function Dashboard() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const token = localStorage.getItem('token');
+  const [filters, setFilters] = useState({
+    dateRange: null as [Dayjs, Dayjs] | null,
+    exerciseName: undefined as string | undefined,
+    stackBy: 'workout_type' as 'workout_type' | 'muscle_group',
+  });
+  const [collapsed, setCollapsed] = useState(false);
+
+  if (!token) {
+    toast.error('Please login to view dashboard');
+    navigate('/login');
+    return null;
+  }
+
+  const { data, isLoading, error } = useQuery<DashboardData, Error>({
+    queryKey: ['dashboard', token, filters],
+    queryFn: async () => {
+      try {
+        const params = new URLSearchParams();
+        if (filters.dateRange) {
+          params.append('date_start', filters.dateRange[0].format('YYYY-MM-DD'));
+          params.append('date_end', filters.dateRange[1].format('YYYY-MM-DD'));
+        }
+        if (filters.exerciseName) params.append('exercise_name', filters.exerciseName);
+        params.append('stack_by', filters.stackBy);
+
+        const res = await axios.get(`/api/dashboard?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        return res.data;
+      } catch (err: any) {
+        if (err.response?.status === 401 || err.response?.status === 403) {
+          localStorage.removeItem('token');
+          navigate('/login');
+          toast.error('Session expired. Please login again.');
+        }
+        throw err;
+      }
+    },
+    retry: 1,
+  });
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    queryClient.clear();
+    navigate('/login');
+    toast.success('Logged out successfully');
+  };
+
+  const columns = [
+    { title: 'Date', dataIndex: 'exercise_date', key: 'exercise_date', render: (d: string) => format(new Date(d), 'dd MMM yyyy') },
+    { title: 'Exercise', dataIndex: 'exercise_name', key: 'exercise_name' },
+    { title: 'Sets', dataIndex: 'sets', key: 'sets' },
+    { title: 'Reps', dataIndex: 'reps', key: 'reps' },
+    { title: 'Weight (kg)', dataIndex: 'weight', key: 'weight', render: (w: number) => w != null ? w : 'Bodyweight' },
+    { title: 'Duration (min)', dataIndex: 'duration', key: 'duration', render: (d: number) => d != null ? d : '-' },
+  ];
+
+  const chartData = data?.workoutFrequency.map((item) => {
+    const result: any = { date: item.date };
+    item.types.forEach((type) => {
+      result[type.type || 'Unknown'] = type.count;
+    });
+    return result;
+  }) || [];
+
+  const types = Array.from(
+    new Set(data?.workoutFrequency.flatMap((item) => item.types.map((t) => t.type || 'Unknown')))
+  );
+
+  return (
+    <Layout style={{ minHeight: '100vh' }}>
+      <Sider collapsible collapsed={collapsed} onCollapse={setCollapsed} breakpoint="md" collapsedWidth={80} style={{ background: '#001529' }}>
+        <div style={{ height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 20, fontWeight: 'bold' }}>
+          {collapsed ? 'FT' : 'FitTrack'}
+        </div>
+        <Menu theme="dark" mode="inline" defaultSelectedKeys={['dashboard']}>
+          <Menu.Item key="dashboard" icon={<HomeOutlined />} onClick={() => navigate('/dashboard')}>
+            Dashboard
+          </Menu.Item>
+          <Menu.Item key="add-workout" icon={<PlusOutlined />} onClick={() => navigate('/gym-notes')}>
+            Add Workout
+          </Menu.Item>
+          <Menu.Item key="summary" icon={<BarChartOutlined />} onClick={() => navigate('/workout-summary')}>
+            Workout Summary
+          </Menu.Item>
+          <Menu.Item key="logout" icon={<LogoutOutlined />} onClick={handleLogout}>
+            Sign Out
+          </Menu.Item>
+        </Menu>
+      </Sider>
+      <Layout>
+        <Header style={{ background: '#fff', padding: '0 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Title level={4} style={{ margin: 0 }}>Fitness Dashboard</Title>
+          <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+            <RangePicker
+              value={filters.dateRange}
+              onChange={(dates) => {
+                if (dates && dates[0] && dates[1]) {
+                  setFilters({ ...filters, dateRange: [dates[0], dates[1]] as [Dayjs, Dayjs] });
+                } else {
+                  setFilters({ ...filters, dateRange: null });
+                }
+              }}
+              style={{ width: 300 }}
+              placeholder={['Start date', 'End date']}
+            />
+
+            <Select
+              placeholder="Select exercise for weight chart"
+              allowClear
+              value={filters.exerciseName}
+              onChange={(value) => setFilters({ ...filters, exerciseName: value })}
+              style={{ width: 200 }}
+            >
+              {data?.exercises.map((exercise) => (
+                <Option key={exercise} value={exercise}>{exercise}</Option>
+              ))}
+            </Select>
+          </div>
+        </Header>
+        <Content style={{ padding: 24, background: '#f0f2f5' }}>
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
+            {isLoading ? (
+              <Spin size="large" style={{ display: 'block', margin: 'auto' }} />
+            ) : error ? (
+              <Text type="danger">{error.message}</Text>
+            ) : (
+              <>
+                {/* Metrics Overview */}
+                <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+                  <Col xs={24} sm={12} md={6}>
+                    <Card>
+                      <Statistic
+                        title="Total Workouts"
+                        value={data?.metrics.totalWorkouts || 0}
+                        prefix={<BarChartOutlined />}
+                        valueStyle={{ color: '#1890ff' }}
+                      />
+                    </Card>
+                  </Col>
+                  <Col xs={24} sm={12} md={6}>
+                    <Card>
+                      <Statistic
+                        title="Total Sets & Reps"
+                        value={`${data?.metrics.totalSets || 0} sets / ${data?.metrics.totalReps || 0} reps`}
+                        prefix={<BarChartOutlined />}
+                        valueStyle={{ color: '#1890ff' }}
+                      />
+                    </Card>
+                  </Col>
+                  <Col xs={24} sm={12} md={6}>
+                    <Card>
+                      <Statistic
+                        title="Average Weight (kg)"
+                        value={data?.metrics.averageWeight ? data.metrics.averageWeight.toFixed(1) : 'N/A'}
+                        prefix={<BarChartOutlined />}
+                        valueStyle={{ color: '#1890ff' }}
+                      />
+                    </Card>
+                  </Col>
+                  <Col xs={24} sm={12} md={6}>
+                    <Card>
+                      <Statistic
+                        title="Total Workout Time (min)"
+                        value={data?.metrics.totalDuration ? data.metrics.totalDuration : 'N/A'}
+                        prefix={<BarChartOutlined />}
+                        valueStyle={{ color: '#1890ff' }}
+                      />
+                    </Card>
+                  </Col>
+                </Row>
+
+                {/* Weekly/Monthly Progress */}
+                <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+                  <Col xs={24} md={12}>
+                    <Card title="Weekly Progress (Last 7 Days)">
+                      <Text>Total Workouts: {data?.weeklyMetrics.totalWorkouts || 0}</Text><br />
+                      <Text>Total Sets: {data?.weeklyMetrics.totalSets || 0}</Text><br />
+                      <Text>Total Weight Lifted: {data?.weeklyMetrics.totalWeight ? `${data.weeklyMetrics.totalWeight} kg` : 'N/A'}</Text><br />
+                      <Text>Last Updated: {data?.weeklyMetrics.totalWorkouts ? formatDistanceToNow(new Date(), { addSuffix: true }) : '-'}</Text>
+                    </Card>
+                  </Col>
+                  <Col xs={24} md={12}>
+                    <Card title="Monthly Progress (Last 30 Days)">
+                      <Text>Total Workouts: {data?.monthlyMetrics.totalWorkouts || 0}</Text><br />
+                      <Text>Total Sets: {data?.monthlyMetrics.totalSets || 0}</Text><br />
+                      <Text>Total Weight Lifted: {data?.monthlyMetrics.totalWeight ? `${data.monthlyMetrics.totalWeight} kg` : 'N/A'}</Text><br />
+                      <Text>Last Updated: {data?.monthlyMetrics.totalWorkouts ? formatDistanceToNow(new Date(), { addSuffix: true }) : '-'}</Text>
+                    </Card>
+                  </Col>
+                </Row>
+
+                {/* Charts */}
+                <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+                  <Col xs={24} md={12}>
+                    <Card title="Weight Progression">
+                      <ResponsiveContainer width="100%" height={300}>
+                        <LineChart data={data?.weightProgression || []}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="date" />
+                          <YAxis />
+                          <Tooltip formatter={(value) => `${value} kg`} />
+                          <Legend />
+                          <Line type="monotone" dataKey="weight" stroke="#1890ff" name={filters.exerciseName || 'All Exercises'} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </Card>
+                  </Col>
+                  <Col xs={24} md={12}>
+                    <Card
+                      title="Workout Frequency"
+                      extra={
+                        <Switch
+                          checkedChildren="By Muscle Group"
+                          unCheckedChildren="By Workout Type"
+                          checked={filters.stackBy === 'muscle_group'}
+                          onChange={(checked) => setFilters({ ...filters, stackBy: checked ? 'muscle_group' : 'workout_type' })}
+                        />
+                      }
+                    >
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={chartData}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="date" />
+                          <YAxis />
+                          <Tooltip />
+                          <Legend />
+                          {types.map((type, index) => (
+                            <Bar key={type} dataKey={type} stackId="a" fill={`hsl(${index * 60}, 70%, 50%)`} />
+                          ))}
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </Card>
+                  </Col>
+                </Row>
+
+                {/* Recent Workouts */}
+                <Card title="Recent Workouts">
+                  {data?.recentWorkouts.length ? (
+                    <Table
+                      dataSource={data.recentWorkouts}
+                      columns={columns}
+                      rowKey="_id"
+                      pagination={false}
+                      footer={() => (
+                        <Button type="link" onClick={() => navigate('/workout-summary')}>
+                          View All Workouts
+                        </Button>
+                      )}
+                    />
+                  ) : (
+                    <Text>No recent workouts</Text>
+                  )}
+                </Card>
+
+                {/* Gamification */}
+                {data?.metrics && data.metrics.totalWorkouts >= 10 && (
+                  <Card style={{ marginTop: 24, background: '#e6f7ff' }}>
+                    <Text strong>🏋️‍♂️ Milestone Achieved! You've completed {data.metrics.totalWorkouts} workouts!</Text>
+                  </Card>
+                )}
+                {data?.metrics && data.metrics.totalSets >= 100 && (
+                  <Card style={{ marginTop: 16, background: '#e6f7ff' }}>
+                    <Text strong>💪 Powerhouse! You've smashed {data.metrics.totalSets} sets!</Text>
+                  </Card>
+                )}
+
+              </>
+            )}
+          </motion.div>
+        </Content>
+      </Layout>
+    </Layout>
+  );
+}

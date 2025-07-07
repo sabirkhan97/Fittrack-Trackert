@@ -1,0 +1,18 @@
+<svg width="135" height="40" viewBox="0 0 135 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="135" height="40" rx="10" fill="black"/>
+  <path d="M25.5 13C26.3284 13 27 12.3284 27 11.5C27 10.6716 26.3284 10 25.5 10C24.6716 10 24 10.6716 24 11.5C24 12.3284 24.6716 13 25.5 13Z" fill="white"/>
+  <path d="M20 15H31C32.6569 15 34 16.3431 34 18V28C34 29.6569 32.6569 31 31 31H20C18.3431 31 17 29.6569 17 28V18C17 16.3431 18.3431 15 20 15Z" fill="white"/>
+  <path d="M22 18H29V20H22V18Z" fill="black"/>
+  <path d="M22 22H29V24H22V22Z" fill="black"/>
+  <path d="M22 26H26V28H22V26Z" fill="black"/>
+  <path d="M45 15H56C57.6569 15 59 16.3431 59 18V28C59 29.6569 57.6569 31 56 31H45C43.3431 31 42 29.6569 42 28V18C42 16.3431 43.3431 15 45 15Z" fill="white"/>
+  <path d="M47 18H54V20H47V18Z" fill="black"/>
+  <path d="M47 22H54V24H47V22Z" fill="black"/>
+  <path d="M47 26H51V28H47V26Z" fill="black"/>
+  <path d="M70 15H81C82.6569 15 84 16.3431 84 18V28C84 29.6569 82.6569 31 81 31H70C68.3431 31 67 29.6569 67 28V18C67 16.3431 68.3431 15 70 15Z" fill="white"/>
+  <path d="M72 18H79V20H72V18Z" fill="black"/>
+  <path d="M72 22H79V24H72V22Z" fill="black"/>
+  <path d="M72 26H76V28H72V26Z" fill="black"/>
+  <text x="95" y="28" font-family="Arial" font-size="14" font-weight="bold" fill="white">Download on the</text>
+  <text x="95" y="28" dy="16" font-family="Arial" font-size="18" font-weight="bold" fill="white">App Store</text>
+</svg>

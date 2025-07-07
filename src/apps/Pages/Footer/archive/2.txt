@@ -1,0 +1,219 @@
+\
+
+
+import { Icons } from "@/components/icons";
+import { useNavigate } from "react-router-dom";
+import fitnessPattern from '@/assets/images/fitness-pattern.svg';
+import appStoreBadge from '@/assets/images/app-store-badge.svg';
+import playStoreBadge from '@/assets/images/play-store-badge.svg';
+
+export function Footer() {
+  const currentYear = new Date().getFullYear();
+  const navigate = useNavigate();
+
+  return (
+    <footer className="relative bg-background border-t overflow-hidden">
+      {/* Decorative background elements */}
+      <div className="absolute inset-0 opacity-10">
+        <div 
+          className="absolute inset-0 bg-repeat opacity-20"
+          style={{ 
+            backgroundImage: `url(${fitnessPattern})`,
+            backgroundSize: '300px'
+          }}
+        ></div>
+      </div>
+      
+      {/* Gradient overlay */}
+      <div className="absolute inset-0 bg-gradient-to-t from-background via-background/80 to-transparent"></div>
+
+      <div className="relative container px-4 sm:px-6 py-12 mx-auto">
+        <div className="grid grid-cols-1 gap-12 md:grid-cols-2 lg:grid-cols-5">
+          {/* Brand Column - Full width on mobile, then adjusts */}
+          <div className="md:col-span-2 lg:col-span-2">
+            <div className="flex items-center space-x-3">
+              <div className="p-2 rounded-lg bg-gradient-to-r from-primary to-purple-600">
+                <Icons.dumbbell  />
+              </div>
+              <span className="text-2xl font-bold tracking-tighter bg-gradient-to-r from-primary to-purple-600 bg-clip-text text-transparent">
+                FitTrack Pro
+              </span>
+            </div>
+            
+            <p className="max-w-md mt-4 text-muted-foreground">
+              Your ultimate fitness companion. Track workouts, monitor progress, and achieve your goals with our AI-powered platform.
+            </p>
+            
+            {/* App Download Badges - Hidden on smallest screens */}
+            <div className="flex flex-wrap gap-3 mt-6">
+              <a href="#" className="hidden xs:inline-block">
+                <img 
+                  src={appStoreBadge} 
+                  alt="Download on the App Store" 
+                  className="h-10 transition-transform hover:scale-105"
+                />
+              </a>
+              <a href="#" className="hidden xs:inline-block">
+                <img 
+                  src={playStoreBadge} 
+                  alt="Get it on Google Play" 
+                  className="h-10 transition-transform hover:scale-105"
+                />
+              </a>
+            </div>
+            
+            {/* Social Icons with subtle animation */}
+            <div className="flex mt-6 space-x-4">
+              {[
+                { icon: Icons.twitter, label: "Twitter" },
+                { icon: Icons.instagram, label: "Instagram" },
+                { icon: Icons.facebook, label: "Facebook" },
+                { icon: Icons.linkedin, label: "LinkedIn" },
+                { icon: Icons.youtube, label: "YouTube" }
+              ].map(({icon: Icon, label}, index) => (
+                <a 
+                  key={index}
+                  href="#" 
+                  className="p-2 rounded-full bg-muted text-muted-foreground transition-all duration-300 hover:text-primary hover:bg-muted/80 hover:-translate-y-1"
+                  aria-label={label}
+                >
+                  <Icon className="w-5 h-5" />
+                </a>
+              ))}
+            </div>
+          </div>
+
+          {/* Quick Links with animated hover */}
+          <div>
+            <h3 className="text-lg font-semibold tracking-tight flex items-center">
+              <span className="w-2 h-2 rounded-full bg-primary mr-2"></span>
+              Navigation
+            </h3>
+            <nav className="mt-5 space-y-3">
+              {[
+                { name: 'Workouts', path: 'gym-notes' },
+                { name: 'Progress', path: 'progress' },
+                { name: 'Exercises', path: 'exercises' },
+                { name: 'Nutrition', path: 'nutrition' },
+                { name: 'Community', path: 'community' }
+              ].map(({name, path}) => (
+                <button
+                  key={path}
+                  onClick={() => navigate(`/${path}`)}
+                  className="block text-sm font-medium text-muted-foreground transition-all duration-300 hover:text-primary hover:translate-x-1"
+                >
+                  {name}
+                </button>
+              ))}
+            </nav>
+          </div>
+
+          {/* Resources with icons */}
+          <div>
+            <h3 className="text-lg font-semibold tracking-tight flex items-center">
+              <span className="w-2 h-2 rounded-full bg-primary mr-2"></span>
+              Resources
+            </h3>
+            <nav className="mt-5 space-y-3">
+              {[
+                { name: 'Blog', icon: Icons.pen },
+                { name: 'Guides', icon: Icons.book },
+                { name: 'Tutorials', icon: Icons.video },
+                { name: 'Support', icon: Icons.lifeBuoy },
+                { name: 'FAQ', icon: Icons.helpCircle }
+              ].map(({name, icon: Icon}) => (
+                <a
+                  key={name}
+                  href="#"
+                  className="flex items-center text-sm font-medium text-muted-foreground transition-all duration-300 hover:text-primary group"
+                >
+                  <Icon className="w-4 h-4 mr-2 opacity-70 group-hover:opacity-100" />
+                  {name}
+                </a>
+              ))}
+            </nav>
+          </div>
+
+          {/* Contact with interactive elements */}
+          <div className="lg:col-span-1">
+            <h3 className="text-lg font-semibold tracking-tight flex items-center">
+              <span className="w-2 h-2 rounded-full bg-primary mr-2"></span>
+              Contact Us
+            </h3>
+            <address className="mt-5 space-y-4 not-italic">
+              <div className="flex items-start">
+                <div className="flex-shrink-0 p-2 rounded-lg bg-muted mr-3">
+                  <Icons.mail  />
+                </div>
+                <a
+                  href="mailto:hello@fittrack.com"
+                  className="text-sm font-medium text-muted-foreground transition-colors duration-300 hover:text-primary"
+                >
+                  hello@fittrack.com
+                </a>
+              </div>
+              <div className="flex items-start">
+                <div className="flex-shrink-0 p-2 rounded-lg bg-muted mr-3">
+                  <Icons.phone  />
+                </div>
+                <a
+                  href="tel:+1234567890"
+                  className="text-sm font-medium text-muted-foreground transition-colors duration-300 hover:text-primary"
+                >
+                  +1 (234) 567-890
+                </a>
+              </div>
+              <div className="flex items-start">
+                <div className="flex-shrink-0 p-2 rounded-lg bg-muted mr-3">
+                  <Icons.mapPin  />
+                </div>
+                <span className="text-sm font-medium text-muted-foreground">
+                  123 Fitness St, Health City
+                </span>
+              </div>
+              
+              {/* Newsletter Signup - Hidden on smallest screens */}
+              <div className="hidden sm:block mt-6">
+                <h4 className="text-sm font-medium mb-2">Stay Updated</h4>
+                <div className="flex">
+                  <input 
+                    type="email" 
+                    placeholder="Your email" 
+                    className="flex-1 px-3 py-2 text-sm border border-r-0 rounded-l-lg focus:outline-none focus:ring-1 focus:ring-primary bg-background"
+                  />
+                  <button className="px-3 py-2 text-sm text-white bg-gradient-to-r from-primary to-purple-600 rounded-r-lg hover:opacity-90 transition-opacity">
+                    <Icons.send className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </address>
+          </div>
+        </div>
+
+        {/* Bottom section with subtle divider */}
+        <div className="pt-8 mt-12 border-t border-border/50">
+          <div className="flex flex-col items-center justify-between md:flex-row">
+            <p className="text-sm text-center text-muted-foreground md:text-left">
+              © {currentYear} FitTrack Pro. All rights reserved.
+            </p>
+            
+            <div className="flex flex-wrap items-center justify-center gap-4 mt-4 md:mt-0">
+              <a href="#" className="text-xs font-medium text-muted-foreground transition-colors duration-300 hover:text-primary hover:underline">
+                Privacy Policy
+              </a>
+              <a href="#" className="text-xs font-medium text-muted-foreground transition-colors duration-300 hover:text-primary hover:underline">
+                Terms of Service
+              </a>
+              <a href="#" className="text-xs font-medium text-muted-foreground transition-colors duration-300 hover:text-primary hover:underline">
+                Cookies
+              </a>
+              <a href="#" className="text-xs font-medium text-muted-foreground transition-colors duration-300 hover:text-primary hover:underline">
+                Accessibility
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </footer>
+  );
+}

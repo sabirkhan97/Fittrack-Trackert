@@ -1,0 +1,200 @@
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+} from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
+import {
+  Collapse,
+  Table,
+  Button,
+  Popconfirm,
+  Spin,
+  Typography,
+  Empty,
+  DatePicker,
+} from 'antd';
+import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+import { toast } from 'sonner';
+import { format, isSameDay } from 'date-fns';
+import { useState } from 'react';
+import dayjs, { Dayjs } from 'dayjs';
+
+const { Title, Text } = Typography;
+const { Panel } = Collapse;
+
+interface Workout {
+  id: string;
+  exercise_name: string;
+  sets: number;
+  reps: number;
+  weight?: number;
+  exercise_date: string;
+  notes?: string;
+  workout_type?: string;
+  target_muscle?: string;
+}
+
+export default function WorkoutSummary() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const token = localStorage.getItem('token');
+
+  const [selectedDate, setSelectedDate] = useState<Dayjs | null>(null);
+
+  if (!token) {
+    navigate('/login');
+    return null;
+  }
+
+  const {
+    data: workouts = [],
+    isLoading,
+    error,
+  } = useQuery<Workout[], Error>({
+    queryKey: ['workouts'],
+    queryFn: async () => {
+      const res = await axios.get('/api/exercises', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return res.data.exercises.map((w: any) => ({
+        id: w._id,
+        exercise_name: w.exercise_name,
+        sets: w.sets,
+        reps: w.reps,
+        weight: w.weight,
+        exercise_date: w.exercise_date,
+        notes: w.notes,
+        workout_type: w.workout_type,
+        target_muscle: w.target_muscle,
+      }));
+    },
+    retry: 1,
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await axios.delete(`/api/exercises/${id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workouts'] });
+      toast.success('Workout deleted');
+    },
+    onError: () => {
+      toast.error('Failed to delete workout');
+    },
+  });
+
+  const columns = [
+    { title: 'Exercise', dataIndex: 'exercise_name', key: 'exercise_name' },
+    { title: 'Sets', dataIndex: 'sets', key: 'sets' },
+    { title: 'Reps', dataIndex: 'reps', key: 'reps' },
+    {
+      title: 'Weight (kg)',
+      dataIndex: 'weight',
+      key: 'weight',
+      render: (w: number) => w || 'Bodyweight',
+    },
+    {
+      title: 'Notes',
+      dataIndex: 'notes',
+      key: 'notes',
+      render: (n: string) => n || '-',
+    },
+    {
+      title: 'Actions',
+      key: 'actions',
+      render: (_: any, record: Workout) => (
+        <Popconfirm
+          title="Delete this workout?"
+          onConfirm={() => deleteMutation.mutate(record.id)}
+        >
+          <Button icon={<DeleteOutlined />} danger type="text" />
+        </Popconfirm>
+      ),
+    },
+  ];
+
+  // ✅ Filter workouts by selected date
+  const filteredWorkouts = selectedDate
+    ? workouts.filter((w) =>
+        isSameDay(new Date(w.exercise_date), selectedDate.toDate())
+      )
+    : workouts;
+
+  // ✅ Group workouts by date + workout type + muscle
+  const groupedWorkouts = filteredWorkouts.reduce((acc: Record<string, Workout[]>, workout) => {
+    const date = format(new Date(workout.exercise_date), 'dd MMM yyyy');
+    const key = `${date} - ${workout.workout_type || 'Unknown Type'} (${workout.target_muscle || 'Unknown Muscle'})`;
+    acc[key] = acc[key] || [];
+    acc[key].push(workout);
+    return acc;
+  }, {});
+
+  const sortedHeaders = Object.keys(groupedWorkouts).sort((a, b) => {
+    const dateA = new Date(a.split(' - ')[0]);
+    const dateB = new Date(b.split(' - ')[0]);
+    return dateB.getTime() - dateA.getTime();
+  });
+
+  return (
+    <div style={{ padding: '24px' }}>
+      <div
+        style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}
+      >
+        <Title level={3}>My Workouts</Title>
+        <Button
+          icon={<PlusOutlined />}
+          type="primary"
+          onClick={() => navigate('/gym-notes')}
+        >
+          Add Workout
+        </Button>
+      </div>
+
+      <div style={{ marginBottom: 24 }}>
+        <DatePicker
+          value={selectedDate}
+          onChange={(date) => setSelectedDate(date)}
+          allowClear
+          style={{ width: 250 }}
+          placeholder="Filter by date"
+        />
+      </div>
+
+      {isLoading ? (
+        <Spin size="large" />
+      ) : error ? (
+        <Text type="danger">{error.message}</Text>
+      ) : filteredWorkouts.length === 0 ? (
+        <Empty
+          description={
+            selectedDate
+              ? 'No workouts on selected date'
+              : 'No workouts yet'
+          }
+        >
+          <Button type="primary" onClick={() => navigate('/gym-notes')}>
+            Add First Workout
+          </Button>
+        </Empty>
+      ) : (
+        <Collapse accordion>
+          {sortedHeaders.map((header) => (
+            <Panel header={header} key={header}>
+              <Table
+                dataSource={groupedWorkouts[header]}
+                columns={columns}
+                rowKey="id"
+                pagination={false}
+              />
+            </Panel>
+          ))}
+        </Collapse>
+      )}
+    </div>
+  );
+}

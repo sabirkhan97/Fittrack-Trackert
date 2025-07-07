@@ -1,0 +1,311 @@
+import React, { useMemo, useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import axios from "axios";
+import { format, isValid, isAfter, isBefore } from "date-fns";
+import {
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionContent,
+} from "@/components/ui/accordion";
+import {
+  Table,
+  TableHeader,
+  TableRow,
+  TableHead,
+  TableBody,
+  TableCell,
+} from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ChevronDown, Trash2, Search, Filter, X } from "lucide-react";
+import { toast } from "sonner";
+import { motion } from "framer-motion";
+import { Badge } from "@/components/ui/badge";
+
+interface Workout {
+  _id: string;
+  exercise_name: string;
+  sets: number;
+  reps: number;
+  weight?: number;
+  workout_type?: string;
+  muscle_group?: string;
+  exercise_date: string;
+  set_type?: string;
+  additional_exercises?: string[];
+  notes?: string;
+}
+
+export default function WorkoutSummary() {
+  const queryClient = useQueryClient();
+  const token = localStorage.getItem("token");
+
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedType, setSelectedType] = useState("all");
+  const [selectedMuscle, setSelectedMuscle] = useState("all");
+  const [startDate, setStartDate] = useState<string>("");
+  const [endDate, setEndDate] = useState<string>("");
+
+  const { data: workouts = [], isLoading, error } = useQuery<Workout[]>({
+    queryKey: ["workouts"],
+    queryFn: async () => {
+      const res = await axios.get("/api/exercises", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return res.data.exercises || [];
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await axios.delete(`/api/exercises/${id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    },
+    onSuccess: () => {
+      toast.success("Workout deleted");
+      queryClient.invalidateQueries({ queryKey: ["workouts"] });
+    },
+    onError: () => {
+      toast.error("Failed to delete");
+    },
+  });
+
+  const workoutTypes = useMemo(() => {
+    const types = new Set<string>();
+    workouts.forEach((w) => w.workout_type && types.add(w.workout_type));
+    return Array.from(types);
+  }, [workouts]);
+
+  const muscleGroups = useMemo(() => {
+    const groups = new Set<string>();
+    workouts.forEach((w) => w.muscle_group && groups.add(w.muscle_group));
+    return Array.from(groups);
+  }, [workouts]);
+
+  const filtered = useMemo(() => {
+    return workouts.filter((w) => {
+      const workoutDate = w.exercise_date ? new Date(w.exercise_date) : null;
+
+      if (startDate && workoutDate && isBefore(workoutDate, new Date(startDate))) {
+        return false;
+      }
+      if (endDate && workoutDate && isAfter(workoutDate, new Date(endDate))) {
+        return false;
+      }
+
+      if (selectedType !== "all" && w.workout_type !== selectedType) return false;
+      if (selectedMuscle !== "all" && w.muscle_group !== selectedMuscle) return false;
+
+      if (searchTerm) {
+        const s = searchTerm.toLowerCase();
+        return (
+          w.exercise_name?.toLowerCase().includes(s) ||
+          w.notes?.toLowerCase().includes(s) ||
+          (w.additional_exercises ?? []).some((ex) =>
+            ex.toLowerCase().includes(s)
+          )
+        );
+      }
+      return true;
+    });
+  }, [workouts, searchTerm, selectedType, selectedMuscle, startDate, endDate]);
+
+  const grouped = useMemo(() => {
+    const groups: Record<string, Workout[]> = {};
+    filtered.forEach((w) => {
+      const dateObj = w.exercise_date ? new Date(w.exercise_date) : null;
+      const formattedDate =
+        dateObj && !isNaN(dateObj.getTime())
+          ? format(dateObj, "MMMM d, yyyy")
+          : "-";
+      const key = `${formattedDate} - ${w.workout_type || "Other"} - ${
+        w.muscle_group || "General"
+      }`;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(w);
+    });
+    return groups;
+  }, [filtered]);
+
+  const clearFilters = () => {
+    setSearchTerm("");
+    setSelectedType("all");
+    setSelectedMuscle("all");
+    setStartDate("");
+    setEndDate("");
+  };
+
+  if (isLoading) return <p>Loading...</p>;
+  if (error) return <p>Error loading workouts</p>;
+
+  return (
+    <div className="container mx-auto my-6">
+      <h2 className="text-2xl font-bold mb-4">Workout Summary</h2>
+
+      {/* Filters */}
+      <div className="grid grid-cols-1 sm:grid-cols-5 gap-4 mb-6">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search by name, notes..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-9"
+          />
+          {searchTerm && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setSearchTerm("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 h-7 w-7"
+            >
+              <X size={14} />
+            </Button>
+          )}
+        </div>
+
+        <Select value={selectedType} onValueChange={setSelectedType}>
+          <SelectTrigger>
+            <SelectValue placeholder="Workout type" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Types</SelectItem>
+            {workoutTypes.map((type) => (
+              <SelectItem key={type} value={type}>
+                {type}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={selectedMuscle} onValueChange={setSelectedMuscle}>
+          <SelectTrigger>
+            <SelectValue placeholder="Muscle group" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Muscles</SelectItem>
+            {muscleGroups.map((m) => (
+              <SelectItem key={m} value={m}>
+                {m}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        {/* DATE RANGE: From */}
+        <Input
+          type="date"
+          value={startDate}
+          onChange={(e) => setStartDate(e.target.value)}
+          placeholder="Start Date"
+          className="w-full"
+        />
+
+        {/* DATE RANGE: To */}
+        <Input
+          type="date"
+          value={endDate}
+          onChange={(e) => setEndDate(e.target.value)}
+          placeholder="End Date"
+          className="w-full"
+        />
+      </div>
+
+      {(startDate || endDate || selectedType !== "all" || selectedMuscle !== "all" || searchTerm) && (
+        <motion.div
+          className="flex items-center gap-2 mb-4"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+        >
+          <Badge variant="outline" className="gap-1 bg-accent/50 text-xs">
+            <Filter size={12} /> Filters applied
+          </Badge>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={clearFilters}
+            className="text-muted-foreground hover:text-primary h-8 px-2"
+          >
+            Clear all
+          </Button>
+        </motion.div>
+      )}
+
+      {/* GROUPED ACCORDION */}
+      <Accordion type="multiple" className="space-y-4">
+        {Object.entries(grouped).map(([group, groupWorkouts]) => (
+          <AccordionItem
+            key={group}
+            value={group}
+            className="border rounded-lg overflow-hidden"
+          >
+            <AccordionTrigger className="px-4">
+              <div className="flex justify-between w-full">
+                <div>
+                  <p className="font-semibold">{group.split(" - ")[0]}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {group.split(" - ").slice(1).join(" | ")}
+                  </p>
+                </div>
+                <ChevronDown className="h-4 w-4" />
+              </div>
+            </AccordionTrigger>
+            <AccordionContent className="overflow-x-auto">
+              <Table className="min-w-[800px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Exercise</TableHead>
+                    <TableHead>Sets</TableHead>
+                    <TableHead>Reps</TableHead>
+                    <TableHead>Weight</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Extras</TableHead>
+                    <TableHead>Notes</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {groupWorkouts.map((w) => (
+                    <TableRow key={w._id}>
+                      <TableCell>{w.exercise_name}</TableCell>
+                      <TableCell>{w.sets}</TableCell>
+                      <TableCell>{w.reps}</TableCell>
+                      <TableCell>{w.weight ? `${w.weight} kg` : "-"}</TableCell>
+                      <TableCell>{w.set_type || "-"}</TableCell>
+                      <TableCell>
+                        {["superset", "alternate"].includes((w.set_type || "").toLowerCase()) && w.additional_exercises?.length
+                          ? w.additional_exercises.join(", ")
+                          : "-"}
+                      </TableCell>
+                      <TableCell>{w.notes || "-"}</TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => deleteMutation.mutate(w._id)}
+                          disabled={deleteMutation.isPending}
+                          className="hover:bg-destructive/10"
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </AccordionContent>
+          </AccordionItem>
+        ))}
+      </Accordion>
+    </div>
+  );
+}

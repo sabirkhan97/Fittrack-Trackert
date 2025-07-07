@@ -1,0 +1,985 @@
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import axios from 'axios';
+import { format, subDays, subMonths, isSameDay } from 'date-fns';
+import { useNavigate } from 'react-router-dom';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  LineChart,
+  Line,
+  AreaChart,
+  Area,
+  RadarChart,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
+  Radar
+} from 'recharts';
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Icons } from '@/components/icons';
+import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+import { toast } from 'sonner';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Progress } from '@/components/ui/progress';
+import { Separator } from '@/components/ui/separator';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import { useState } from 'react';
+
+interface Workout {
+  id: string; // Updated to string for MongoDB _id
+  exercise_name: string;
+  sets: number;
+  reps: number;
+  weight?: number;
+  exercise_date: string;
+  workout_type?: string;
+  muscle_group?: string;
+  set_type?: string;
+  additional_exercises?: string[] | string;
+  notes?: string;
+}
+
+const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#A4DE6C', '#D0ED57'];
+
+export default function WorkoutSummary() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const token = localStorage.getItem('token');
+  const [showBodyweight, setShowBodyweight] = useState(true);
+  const [timeRange, setTimeRange] = useState<'week' | 'month' | 'all'>('week');
+
+  // Redirect to login if no token
+  if (!token) {
+    navigate('/login');
+    return null;
+  }
+
+  const { data: workouts = [], isLoading, error } = useQuery<Workout[], Error>({
+    queryKey: ['workouts', token],
+    queryFn: async () => {
+      try {
+        const response = await axios.get('/api/exercises', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        return (response.data.exercises || []).map((workout: any) => ({
+          id: workout._id, // Map _id to id
+          exercise_name: workout.exercise_name,
+          sets: workout.sets,
+          reps: workout.reps,
+          weight: workout.weight,
+          exercise_date: workout.exercise_date,
+          workout_type: workout.workout_type,
+          muscle_group: workout.muscle_group,
+          set_type: workout.set_type,
+          additional_exercises: typeof workout.additional_exercises === 'string'
+            ? JSON.parse(workout.additional_exercises)
+            : workout.additional_exercises || [],
+          notes: workout.notes,
+        }));
+      } catch (err:any) {
+        console.error('Fetch workouts error:', {
+          message: err.message,
+          code: err.code,
+          response: err.response?.data,
+          status: err.response?.status,
+        });
+        if (axios.isAxiosError(err)) {
+          if (err.response?.status === 401 || err.response?.status === 403) {
+            localStorage.removeItem('token');
+            navigate('/login');
+            throw new Error('Session expired. Please log in again.');
+          }
+          throw new Error(err.response?.data?.error || 'Failed to fetch workouts');
+        }
+        throw new Error('Network error. Please check your connection.');
+      }
+    },
+    staleTime: 1000 * 60 * 5,
+    retry: 1,
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (exerciseId: string) => {
+      await axios.delete(`/api/exercises/${exerciseId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workouts', token] });
+      toast.success('Workout deleted successfully');
+    },
+    onError: (err: any) => {
+      console.error('Delete error:', {
+        message: err.message,
+        code: err.code,
+        response: err.response?.data,
+        status: err.response?.status,
+      });
+      toast.error(err.response?.data?.error || 'Failed to delete workout');
+    },
+  });
+
+  const processWorkoutData = () => {
+    const filteredWorkouts = showBodyweight 
+      ? workouts 
+      : workouts.filter(w => w.weight && w.weight > 0);
+
+    const dateRange = timeRange === 'week' ? 7 : timeRange === 'month' ? 30 : Infinity;
+    const recentWorkouts = dateRange === Infinity 
+      ? filteredWorkouts 
+      : filteredWorkouts.filter(w => 
+          new Date(w.exercise_date) >= subDays(new Date(), dateRange - 1));
+
+    const lastNDays = Array.from({ length: dateRange }, (_, i) => {
+      const date = subDays(new Date(), dateRange - 1 - i);
+      return format(date, 'yyyy-MM-dd');
+    });
+
+    const dailyData = lastNDays.map(date => {
+      const dayWorkouts = recentWorkouts.filter(w => 
+        format(new Date(w.exercise_date), 'yyyy-MM-dd') === date
+      );
+      const totalVolume = dayWorkouts.reduce((sum, w) => sum + (w.sets * w.reps * (w.weight || 1)), 0);
+      const totalSets = dayWorkouts.reduce((sum, w) => sum + w.sets, 0);
+      const totalReps = dayWorkouts.reduce((sum, w) => sum + w.reps, 0);
+
+      return {
+        date: format(new Date(date), timeRange === 'week' ? 'EEE' : 'MMM d'),
+        volume: totalVolume,
+        workouts: dayWorkouts.length,
+        sets: totalSets,
+        reps: totalReps
+      };
+    });
+
+    const typeCount = recentWorkouts.reduce((acc: Record<string, number>, w) => {
+      const type = w.workout_type || 'Unknown';
+      acc[type] = (acc[type] || 0) + 1;
+      return acc;
+    }, {});
+
+    const typeData = Object.entries(typeCount).map(([name, value]) => ({
+      name,
+      value,
+      fill: COLORS[Object.keys(typeCount).indexOf(name) % COLORS.length]
+    }));
+
+    const muscleCount = recentWorkouts.reduce((acc: Record<string, number>, w) => {
+      if (!w.muscle_group) return acc;
+      acc[w.muscle_group] = (acc[w.muscle_group] || 0) + 1;
+      return acc;
+    }, {});
+
+    const muscleData = Object.entries(muscleCount)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 7)
+      .map(([name, value]) => ({
+        subject: name,
+        A: value,
+        fullMark: Math.max(...Object.values(muscleCount)) * 1.2
+      }));
+
+    const groupedByDate = recentWorkouts.reduce((acc: Record<string, Workout[]>, workout) => {
+      const date = format(new Date(workout.exercise_date), 'yyyy-MM-dd');
+      if (!acc[date]) acc[date] = [];
+      acc[date].push(workout);
+      return acc;
+    }, {});
+
+    const sortedWorkouts = Object.entries(groupedByDate)
+      .sort(([dateA], [dateB]) => new Date(dateB).getTime() - new Date(dateA).getTime())
+      .slice(0, 5);
+
+    // Calculate streaks
+    let currentStreak = 0;
+    let longestStreak = 0;
+    let tempStreak = 0;
+    const today = format(new Date(), 'yyyy-MM-dd');
+    const yesterday = format(subDays(new Date(), 1), 'yyyy-MM-dd');
+
+    const uniqueDates = [...new Set(filteredWorkouts.map(w => 
+      format(new Date(w.exercise_date), 'yyyy-MM-dd')
+    ))].sort();
+
+    for (let i = 0; i < uniqueDates.length; i++) {
+      if (i === 0 || isSameDay(
+        subDays(new Date(uniqueDates[i]), 1), 
+        new Date(uniqueDates[i - 1])
+      )) {
+        tempStreak++;
+        longestStreak = Math.max(longestStreak, tempStreak);
+      } else {
+        tempStreak = 1;
+      }
+    }
+
+    if (uniqueDates.includes(today) || uniqueDates.includes(yesterday)) {
+      currentStreak = tempStreak;
+    }
+
+    return { 
+      dailyData, 
+      typeData, 
+      muscleData, 
+      sortedWorkouts,
+      stats: {
+        totalWorkouts: filteredWorkouts.length,
+        totalVolume: filteredWorkouts.reduce((sum, w) => sum + (w.sets * w.reps * (w.weight || 1)), 0),
+        avgIntensity: filteredWorkouts.length > 0 
+          ? Math.round(filteredWorkouts.reduce((sum, w) => sum + (w.sets * w.reps), 0) / filteredWorkouts.length)
+          : 0,
+        currentStreak,
+        longestStreak,
+        favoriteType: typeData[0]?.name || 'N/A',
+        topMuscleGroup: muscleData[0]?.subject || 'N/A'
+      }
+    };
+  };
+
+  const { 
+    dailyData, 
+    typeData, 
+    muscleData, 
+    sortedWorkouts,
+    stats 
+  } = processWorkoutData();
+
+  if (error) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="flex flex-col items-center justify-center space-y-4 h-[60vh]">
+          <Icons.warning className="h-12 w-12 text-red-500" />
+          <h2 className="text-2xl font-bold">Failed to load workout data</h2>
+          <p className="text-muted-foreground max-w-md text-center">{error.message}</p>
+          <div className="flex gap-2">
+            <Button onClick={() => navigate('/gym-notes')}>
+              <Icons.arrowLeft className="mr-2 h-4 w-4" />
+              Back to Workouts
+            </Button>
+            <Button variant="outline" onClick={() => window.location.reload()}>
+              <Icons.refresh className="mr-2 h-4 w-4" />
+              Try Again
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="container mx-auto px-4 py-8 space-y-6">
+      {/* Header with controls */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-primary">Workout Dashboard</h1>
+          <p className="text-muted-foreground">
+            Track your fitness progress and workout history
+          </p>
+        </div>
+        
+        <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+          <div className="flex items-center space-x-2">
+            <Switch 
+              id="bodyweight-toggle" 
+              checked={showBodyweight}
+              onCheckedChange={setShowBodyweight}
+            />
+            <Label htmlFor="bodyweight-toggle">Include Bodyweight</Label>
+          </div>
+          
+          <div className="flex gap-2">
+            <Button 
+              variant={timeRange === 'week' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setTimeRange('week')}
+            >
+              Week
+            </Button>
+            <Button 
+              variant={timeRange === 'month' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setTimeRange('month')}
+            >
+              Month
+            </Button>
+            <Button 
+              variant={timeRange === 'all' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setTimeRange('all')}
+            >
+              All Time
+            </Button>
+          </div>
+          
+          <Button 
+            className="ml-auto"
+            onClick={() => navigate('/gym-notes')}
+          >
+            <Icons.plus className="mr-2 h-4 w-4" />
+            New Workout
+          </Button>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {[...Array(4)].map((_, i) => (
+              <Card key={i}>
+                <CardHeader className="space-y-0 pb-2">
+                  <Skeleton className="h-4 w-24" />
+                </CardHeader>
+                <CardContent>
+                  <Skeleton className="h-8 w-full" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {[...Array(2)].map((_, i) => (
+              <Card key={i}>
+                <CardHeader>
+                  <Skeleton className="h-6 w-32" />
+                </CardHeader>
+                <CardContent>
+                  <Skeleton className="h-64 w-full" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+          <Card>
+            <CardHeader>
+              <Skeleton className="h-6 w-32" />
+            </CardHeader>
+            <CardContent>
+              <Skeleton className="h-64 w-full" />
+            </CardContent>
+          </Card>
+        </div>
+      ) : (
+        <>
+          {/* Stats Overview */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <StatCard
+              title="Total Workouts"
+              value={stats.totalWorkouts}
+              change={timeRange !== 'all' ? `${Math.round((stats.totalWorkouts / workouts.length) * 100)}% of all` : undefined}
+              icon={<Icons.dumbbell />}
+              description={`${timeRange === 'all' ? 'All time' : `Last ${timeRange}`} exercises`}
+            />
+            <StatCard
+              title="Total Volume"
+              value={`${(stats.totalVolume / 1000).toFixed(1)} tons`}
+              change={timeRange !== 'all' ? `${Math.round((stats.totalVolume / workouts.reduce((sum, w) => sum + (w.sets * w.reps * (w.weight || 1)), 0)) * 100)}% of all` : undefined}
+              icon={<Icons.weight className="text-green-500" />}
+              description="Total weight lifted"
+            />
+            <StatCard
+              title="Current Streak"
+              value={`${stats.currentStreak} days`}
+              change={`Longest: ${stats.longestStreak}`}
+              icon={<Icons.flame className="text-orange-500" />}
+              description="Consecutive workout days"
+            />
+            <StatCard
+              title="Top Muscle Group"
+              value={stats.topMuscleGroup}
+              icon={<Icons.muscle className="text-purple-500" />}
+              description="Most trained area"
+            />
+          </div>
+
+          {/* Charts Section */}
+          <Tabs defaultValue="overview" className="space-y-4">
+            <TabsList className="grid grid-cols-3 w-full md:w-[400px]">
+              <TabsTrigger value="overview">Overview</TabsTrigger>
+              <TabsTrigger value="progress">Progress</TabsTrigger>
+              <TabsTrigger value="distribution">Distribution</TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="overview" className="space-y-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <ChartCard 
+                  title="Workout Volume Trend" 
+                  description={`Daily workout volume over the last ${timeRange}`}
+                >
+                  <ResponsiveContainer width="100%" height={300}>
+                    <AreaChart data={dailyData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                      <XAxis 
+                        dataKey="date" 
+                        tick={{ fill: '#6b7280' }}
+                        axisLine={{ stroke: '#e5e7eb' }}
+                      />
+                      <YAxis 
+                        tick={{ fill: '#6b7280' }}
+                        axisLine={{ stroke: '#e5e7eb' }}
+                      />
+                      <Tooltip 
+                        contentStyle={{
+                          backgroundColor: '#ffffff',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '0.5rem',
+                          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+                        }}
+                      />
+                      <Area 
+                        type="monotone" 
+                        dataKey="volume" 
+                        name="Volume (kg)" 
+                        stroke="#8884d8" 
+                        fill="#8884d8" 
+                        fillOpacity={0.2}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </ChartCard>
+                
+                <ChartCard 
+                  title="Workout Type Distribution" 
+                  description="Breakdown of your workout types"
+                >
+                  <ResponsiveContainer width="100%" height={300}>
+                    <PieChart>
+                      <Pie
+                        data={typeData}
+                        cx="50%"
+                        cy="50%"
+                        labelLine={false}
+                        outerRadius={80}
+                        innerRadius={50}
+                        paddingAngle={5}
+                        dataKey="value"
+                        nameKey="name"
+                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                      >
+                        {typeData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.fill} />
+                        ))}
+                      </Pie>
+                      <Tooltip 
+                        contentStyle={{
+                          backgroundColor: '#ffffff',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '0.5rem',
+                          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+                        }}
+                      />
+                      <Legend 
+                        layout="vertical" 
+                        verticalAlign="middle" 
+                        align="right"
+                        wrapperStyle={{
+                          paddingLeft: '20px'
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </ChartCard>
+              </div>
+              
+              <ChartCard 
+                title="Muscle Group Focus" 
+                description="Your training focus by muscle group"
+              >
+                <ResponsiveContainer width="100%" height={350}>
+                  <RadarChart cx="50%" cy="50%" outerRadius="80%" data={muscleData}>
+                    <PolarGrid stroke="#e5e7eb" />
+                    <PolarAngleAxis 
+                      dataKey="subject" 
+                      tick={{ fill: '#6b7280' }}
+                    />
+                    <PolarRadiusAxis 
+                      angle={30} 
+                      domain={[0, 'dataMax']} 
+                      tick={{ fill: '#6b7280' }}
+                    />
+                    <Radar 
+                      name="Workouts" 
+                      dataKey="A" 
+                      stroke="#8884d8" 
+                      fill="#8884d8" 
+                      fillOpacity={0.6} 
+                    />
+                    <Tooltip 
+                      contentStyle={{
+                        backgroundColor: '#ffffff',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '0.5rem',
+                        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+                      }}
+                    />
+                  </RadarChart>
+                </ResponsiveContainer>
+              </ChartCard>
+            </TabsContent>
+            
+            <TabsContent value="progress" className="space-y-4">
+              <ChartCard 
+                title="Strength Progress" 
+                description="Your performance trends over time"
+              >
+                <ResponsiveContainer width="100%" height={350}>
+                  <LineChart data={dailyData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                    <XAxis 
+                      dataKey="date" 
+                      tick={{ fill: '#6b7280' }}
+                      axisLine={{ stroke: '#e5e7eb' }}
+                    />
+                    <YAxis 
+                      tick={{ fill: '#6b7280' }}
+                      axisLine={{ stroke: '#e5e7eb' }}
+                    />
+                    <Tooltip 
+                      contentStyle={{
+                        backgroundColor: '#ffffff',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '0.5rem',
+                        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+                      }}
+                    />
+                    <Legend />
+                    <Line 
+                      type="monotone" 
+                      dataKey="volume" 
+                      name="Volume (kg)" 
+                      stroke="#8884d8" 
+                      strokeWidth={2}
+                      dot={{ r: 4 }}
+                      activeDot={{ r: 6 }}
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="sets" 
+                      name="Total Sets" 
+                      stroke="#82ca9d" 
+                      strokeWidth={2}
+                      dot={{ r: 4 }}
+                      activeDot={{ r: 6 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </ChartCard>
+            </TabsContent>
+            
+            <TabsContent value="distribution" className="space-y-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <ChartCard 
+                  title="Workout Intensity" 
+                  description="Distribution of sets and reps"
+                >
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={dailyData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                      <XAxis 
+                        dataKey="date" 
+                        tick={{ fill: '#6b7280' }}
+                        axisLine={{ stroke: '#e5e7eb' }}
+                      />
+                      <YAxis 
+                        tick={{ fill: '#6b7280' }}
+                        axisLine={{ stroke: '#e5e7eb' }}
+                      />
+                      <Tooltip 
+                        contentStyle={{
+                          backgroundColor: '#ffffff',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '0.5rem',
+                          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+                        }}
+                      />
+                      <Legend />
+                      <Bar 
+                        dataKey="sets" 
+                        name="Sets" 
+                        fill="#8884d8" 
+                        radius={[4, 4, 0, 0]}
+                      />
+                      <Bar 
+                        dataKey="reps" 
+                        name="Reps" 
+                        fill="#82ca9d" 
+                        radius={[4, 4, 0, 0]}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </ChartCard>
+                
+                <ChartCard 
+                  title="Muscle Group Balance" 
+                  description="Comparison of left vs right side training"
+                >
+                  <div className="flex flex-col items-center justify-center h-[300px]">
+                    <div className="text-muted-foreground text-center">
+                      <Icons.balance className="mx-auto h-12 w-12" />
+                      <p className="mt-2">Coming Soon: Muscle Balance Analysis</p>
+                      <p className="text-sm">Track your bilateral training balance</p>
+                    </div>
+                  </div>
+                </ChartCard>
+              </div>
+            </TabsContent>
+          </Tabs>
+
+          {/* Recent Workouts Section */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <Card className="lg:col-span-2">
+              <CardHeader>
+                <CardTitle>Recent Workout Sessions</CardTitle>
+                <CardDescription>Your most recent workout days</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {sortedWorkouts.length > 0 ? (
+                  <ScrollArea className="h-[500px] pr-4">
+                    <div className="space-y-4">
+                      {sortedWorkouts.map(([date, exercises]) => {
+                        const workoutDate = new Date(date);
+                        const formattedDate = format(workoutDate, 'MMMM d, yyyy');
+                        const totalExercises = exercises.length;
+                        const totalVolume = exercises.reduce(
+                          (sum, ex) => sum + (ex.sets * ex.reps * (ex.weight || 1)),
+                          0
+                        ).toLocaleString();
+
+                        return (
+                          <Card key={date} className="hover:shadow-md transition-shadow">
+                            <Accordion type="single" collapsible>
+                              <AccordionItem value={date} className="border-b-0">
+                                <AccordionTrigger className="hover:no-underline px-4 py-3">
+                                  <div className="flex items-center justify-between w-full pr-4">
+                                    <div className="flex items-center space-x-4">
+                                      <div className="flex flex-col items-center bg-gradient-to-br from-primary to-blue-600 text-white rounded-lg p-2 min-w-[60px]">
+                                        <span className="text-sm font-medium">
+                                          {format(workoutDate, 'EEE')}
+                                        </span>
+                                        <span className="text-lg font-bold">
+                                          {format(workoutDate, 'd')}
+                                        </span>
+                                      </div>
+                                      <div className="text-left">
+                                        <h3 className="font-semibold">{formattedDate}</h3>
+                                        <p className="text-sm text-muted-foreground flex gap-1.5">
+                                          <span>
+                                            {exercises[0]?.workout_type || 'Mixed workout'}
+                                          </span>
+                                          {exercises[0]?.muscle_group && (
+                                            <Badge variant="secondary">
+                                              {exercises[0].muscle_group}
+                                            </Badge>
+                                          )}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center space-x-6">
+                                      <div className="text-right">
+                                        <p className="text-sm font-medium">{totalExercises} exercises</p>
+                                        <p className="text-xs text-muted-foreground">
+                                          {totalVolume} kg total
+                                        </p>
+                                      </div>
+                                      <Icons.chevronDown className="text-muted-foreground" />
+                                    </div>
+                                  </div>
+                                </AccordionTrigger>
+                                <AccordionContent className="px-4 pb-4">
+                                  <div className="space-y-4">
+                                    {exercises.map((exercise) => (
+                                      <div key={exercise.id} className="border rounded-lg p-4">
+                                        <div className="flex justify-between items-start">
+                                          <div>
+                                            <h4 className="font-medium flex items-center gap-2">
+                                              {exercise.exercise_name}
+                                              {exercise.set_type && (
+                                                <Badge variant="outline">
+                                                  {exercise.set_type}
+                                                </Badge>
+                                              )}
+                                            </h4>
+                                            <div className="flex gap-4 mt-2 text-sm">
+                                              <span>Sets: {exercise.sets}</span>
+                                              <span>Reps: {exercise.reps}</span>
+                                              <span>
+                                                {exercise.weight ? `${exercise.weight} kg` : 'Bodyweight'}
+                                              </span>
+                                            </div>
+                                          </div>
+                                          <AlertDialog>
+                                            <AlertDialogTrigger asChild>
+                                              <Button 
+                                                variant="ghost" 
+                                                size="sm" 
+                                                className="text-destructive hover:text-destructive"
+                                              >
+                                                <Icons.trash className="h-4 w-4" />
+                                              </Button>
+                                            </AlertDialogTrigger>
+                                            <AlertDialogContent>
+                                              <AlertDialogHeader>
+                                                <AlertDialogTitle>Delete Workout</AlertDialogTitle>
+                                                <AlertDialogDescription>
+                                                  Are you sure you want to delete "{exercise.exercise_name}"? This action cannot be undone.
+                                                </AlertDialogDescription>
+                                              </AlertDialogHeader>
+                                              <AlertDialogFooter>
+                                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                                <AlertDialogAction
+                                                  onClick={() => deleteMutation.mutate(exercise.id)}
+                                                  className="bg-destructive hover:bg-destructive/90"
+                                                >
+                                                  Delete
+                                                </AlertDialogAction>
+                                              </AlertDialogFooter>
+                                            </AlertDialogContent>
+                                          </AlertDialog>
+                                        </div>
+                                        {exercise.notes && (
+                                          <div className="mt-3 text-sm text-muted-foreground">
+                                            <p className="font-medium">Notes:</p>
+                                            <p>{exercise.notes}</p>
+                                          </div>
+                                        )}
+                                        <div className="mt-3 flex justify-between items-center">
+                                          <span className="text-sm font-medium">
+                                            Volume: {(exercise.sets * exercise.reps * (exercise.weight || 1)).toLocaleString()} kg
+                                          </span>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => navigate(`/gym-notes?date=${date}`)}
+                                          >
+                                            <Icons.plus className="mr-2 h-4 w-4" />
+                                            Add Similar
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </AccordionContent>
+                              </AccordionItem>
+                            </Accordion>
+                          </Card>
+                        );
+                      })}
+                    </div>
+                  </ScrollArea>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-12">
+                    <Icons.dumbbell />
+                    <p className="text-muted-foreground mt-4 text-center">
+                      No workouts recorded yet. Start your fitness journey today!
+                    </p>
+                    <Button className="mt-4" onClick={() => navigate('/gym-notes')}>
+                      Add Your First Workout
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Progress and Goals */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Monthly Progress</CardTitle>
+                <CardDescription>Your workout goals and achievements</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-sm font-medium">Workout Frequency</span>
+                    <span className="text-sm text-muted-foreground">
+                      {dailyData.filter(d => d.workouts > 0).length}/{dailyData.length} days
+                    </span>
+                  </div>
+                  <Progress 
+                    value={(dailyData.filter(d => d.workouts > 0).length / dailyData.length * 100)} 
+                    className="h-2"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Target: 80% of days ({(dailyData.length * 0.8).toFixed(0)} days)
+                  </p>
+                </div>
+                
+                <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-sm font-medium">Volume Progress</span>
+                    <span className="text-sm text-muted-foreground">
+                      {Math.round(stats.totalVolume / 1000)}k kg
+                    </span>
+                  </div>
+                  <Progress 
+                    value={Math.min(stats.totalVolume / 50000 * 100, 100)} 
+                    className="h-2"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Target: 50,000 kg this month
+                  </p>
+                </div>
+                
+                <Separator />
+                
+                <div>
+                  <h3 className="font-medium mb-3">Quick Actions</h3>
+                  <div className="space-y-2">
+                    <Button 
+                      variant="outline" 
+                      className="w-full justify-start"
+                      onClick={() => navigate('/gym-notes')}
+                    >
+                      <Icons.plus className="mr-2 h-4 w-4" />
+                      Add New Workout
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      className="w-full justify-start"
+                      onClick={() => navigate('/workout-plans')}
+                    >
+                      <Icons.clipboardList className="mr-2 h-4 w-4" />
+                      View Workout Plans
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      className="w-full justify-start"
+                      onClick={() => navigate('/progress-photos')}
+                    >
+                      <Icons.camera className="mr-2 h-4 w-4" />
+                      Progress Photos
+                    </Button>
+                  </div>
+                </div>
+                
+                <Separator />
+                
+                <div>
+                  <h3 className="font-medium mb-3">Achievements</h3>
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-3 p-3 border rounded-lg">
+                      <div className="bg-yellow-100 p-2 rounded-full">
+                        <Icons.trophy className="h-5 w-5 text-yellow-600" />
+                      </div>
+                      <div>
+                        <p className="font-medium">Consistency Master</p>
+                        <p className="text-xs text-muted-foreground">
+                          {stats.currentStreak} day streak - Keep it up!
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 p-3 border rounded-lg">
+                      <div className="bg-blue-100 p-2 rounded-full">
+                        <Icons.weight className="h-5 w-5 text-blue-600" />
+                      </div>
+                      <div>
+                        <p className="font-medium">Volume Champion</p>
+                        <p className="text-xs text-muted-foreground">
+                          Lifted {(stats.totalVolume / 1000).toFixed(1)} tons this month
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Helper components
+function StatCard({ 
+  title, 
+  value, 
+  icon, 
+  description,
+  change
+}: {
+  title: string;
+  value: string | number;
+  icon: React.ReactNode;
+  description: string;
+  change?: string;
+}) {
+  return (
+    <Card className="hover:shadow-md transition-shadow">
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium">{title}</CardTitle>
+        <div className="h-5 w-5 rounded-full bg-muted/50 flex items-center justify-center">
+          {icon}
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="text-2xl font-bold">{value}</div>
+        <p className="text-xs text-muted-foreground">
+          {description}
+          {change && (
+            <span className="ml-2 text-green-600 dark:text-green-400">
+              {change}
+            </span>
+          )}
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ChartCard({ 
+  title, 
+  description,
+  children 
+}: {
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Card className="hover:shadow-md transition-shadow">
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        {description && (
+          <CardDescription>{description}</CardDescription>
+        )}
+      </CardHeader>
+      <CardContent>
+        {children}
+      </CardContent>
+    </Card>
+  );
+}

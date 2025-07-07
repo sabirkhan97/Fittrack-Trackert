@@ -1,0 +1,352 @@
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
+import {
+  Card,
+  Row,
+  Col,
+  Statistic,
+  Spin,
+  Typography,
+  Button,
+  Table,
+  Select,
+  DatePicker,
+} from 'antd';
+import {
+  PlusOutlined,
+  BarChartOutlined,
+  LogoutOutlined,
+} from '@ant-design/icons';
+import { toast } from 'sonner';
+import { format } from 'date-fns';
+import { useState } from 'react';
+import dayjs, { Dayjs } from 'dayjs';
+import {
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from 'recharts';
+
+const { Title, Text } = Typography;
+const { RangePicker } = DatePicker;
+const { Option } = Select;
+
+interface Workout {
+  _id: string;
+  exercise_name: string;
+  sets: number;
+  reps: number;
+  weight?: number;
+  exercise_date: string;
+  workout_type?: string;
+  muscle_group?: string;
+}
+
+interface DashboardData {
+  metrics?: {
+    totalWorkouts: number;
+    totalSets: number;
+    totalReps: number;
+    averageWeight: number | null;
+  };
+  weightProgression: { date: string; weight: number }[];
+  workoutFrequency: {
+    date: string;
+    types: { workout_type: string; count: number }[];
+  }[];
+  recentWorkouts: Workout[];
+  exercises: string[];
+}
+
+export default function Dashboard() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const token = localStorage.getItem('token');
+
+  const [filters, setFilters] = useState<{
+    dateRange: [Dayjs | null, Dayjs | null] | null;
+    exerciseName?: string;
+  }>({
+    dateRange: null,
+    exerciseName: undefined,
+  });
+
+  if (!token) {
+    toast.error('Please login to view dashboard');
+    navigate('/login');
+    return null;
+  }
+
+  const { data, isLoading, error } = useQuery<DashboardData, Error>({
+    queryKey: ['dashboard', token, filters],
+    queryFn: async () => {
+      try {
+        const params = new URLSearchParams();
+        if (
+          filters.dateRange &&
+          filters.dateRange[0] &&
+          filters.dateRange[1]
+        ) {
+          params.append(
+            'date_start',
+            filters.dateRange[0].format('YYYY-MM-DD')
+          );
+          params.append('date_end', filters.dateRange[1].format('YYYY-MM-DD'));
+        }
+        if (filters.exerciseName)
+          params.append('exercise_name', filters.exerciseName);
+
+        const res = await axios.get(`/api/dashboard?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        return res.data;
+      } catch (err: any) {
+        if (err.response?.status === 401 || err.response?.status === 403) {
+          localStorage.removeItem('token');
+          navigate('/login');
+          toast.error('Session expired. Please login again.');
+        }
+        throw err;
+      }
+    },
+    retry: 1,
+  });
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    queryClient.clear();
+    navigate('/login');
+    toast.success('Logged out successfully');
+  };
+
+  const columns = [
+    {
+      title: 'Date',
+      dataIndex: 'exercise_date',
+      key: 'exercise_date',
+      render: (d: string) => format(new Date(d), 'dd MMM yyyy'),
+    },
+    { title: 'Exercise', dataIndex: 'exercise_name', key: 'exercise_name' },
+    { title: 'Sets', dataIndex: 'sets', key: 'sets' },
+    { title: 'Reps', dataIndex: 'reps', key: 'reps' },
+    {
+      title: 'Weight (kg)',
+      dataIndex: 'weight',
+      key: 'weight',
+      render: (w: number | undefined) =>
+        w != null ? w : 'Bodyweight',
+    },
+  ];
+
+  const chartData =
+    data?.workoutFrequency.map((item) => {
+      const result: any = { date: item.date };
+      item.types.forEach((type) => {
+        result[type.workout_type || 'Unknown'] = type.count;
+      });
+      return result;
+    }) || [];
+
+  const workoutTypes = Array.from(
+    new Set(
+      data?.workoutFrequency.flatMap((item) =>
+        item.types.map((t) => t.workout_type || 'Unknown')
+      ) || []
+    )
+  );
+
+  return (
+    <div style={{ padding: '24px' }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 24,
+        }}
+      >
+        <Title level={3}>Fitness Dashboard</Title>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Button
+            icon={<PlusOutlined />}
+            type="primary"
+            onClick={() => navigate('/gym-notes')}
+          >
+            Add Workout
+          </Button>
+          <Button
+            icon={<BarChartOutlined />}
+            onClick={() => navigate('/workout-summary')}
+          >
+            View Summary
+          </Button>
+          <Button icon={<LogoutOutlined />} danger onClick={handleLogout}>
+            Sign Out
+          </Button>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div
+        style={{ marginBottom: 24, display: 'flex', gap: 16, flexWrap: 'wrap' }}
+      >
+        <RangePicker
+          value={filters.dateRange}
+          onChange={(dates) =>
+            setFilters((prev) => ({ ...prev, dateRange: dates }))
+          }
+          style={{ width: 300 }}
+          placeholder={['Start date', 'End date']}
+        />
+        <Select
+          placeholder="Select exercise for weight chart"
+          allowClear
+          value={filters.exerciseName}
+          onChange={(value) =>
+            setFilters((prev) => ({ ...prev, exerciseName: value }))
+          }
+          style={{ width: 200 }}
+        >
+          {data?.exercises.map((exercise) => (
+            <Option key={exercise} value={exercise}>
+              {exercise}
+            </Option>
+          ))}
+        </Select>
+      </div>
+
+      {isLoading ? (
+        <Spin size="large" style={{ display: 'block', margin: 'auto' }} />
+      ) : error ? (
+        <Text type="danger">{error.message}</Text>
+      ) : (
+        <>
+          {/* Metric Cards */}
+          <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+            <Col xs={24} sm={12} md={6}>
+              <Card>
+                <Statistic
+                  title="Total Workouts"
+                  value={data?.metrics?.totalWorkouts || 0}
+                  prefix={<BarChartOutlined />}
+                />
+              </Card>
+            </Col>
+            <Col xs={24} sm={12} md={6}>
+              <Card>
+                <Statistic
+                  title="Total Sets"
+                  value={data?.metrics?.totalSets || 0}
+                  prefix={<BarChartOutlined />}
+                />
+              </Card>
+            </Col>
+            <Col xs={24} sm={12} md={6}>
+              <Card>
+                <Statistic
+                  title="Total Reps"
+                  value={data?.metrics?.totalReps || 0}
+                  prefix={<BarChartOutlined />}
+                />
+              </Card>
+            </Col>
+            <Col xs={24} sm={12} md={6}>
+              <Card>
+                <Statistic
+                  title="Average Weight (kg)"
+                  value={
+                    data?.metrics?.averageWeight != null
+                      ? data.metrics.averageWeight.toFixed(1)
+                      : 'N/A'
+                  }
+                  prefix={<BarChartOutlined />}
+                />
+              </Card>
+            </Col>
+          </Row>
+
+          {/* Charts */}
+          <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+            <Col xs={24} md={12}>
+              <Card title="Weight Progression">
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={data?.weightProgression || []}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="date" />
+                    <YAxis />
+                    <Tooltip />
+                    <Legend />
+                    <Line
+                      type="monotone"
+                      dataKey="weight"
+                      stroke="#1890ff"
+                      name="Weight (kg)"
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </Card>
+            </Col>
+            <Col xs={24} md={12}>
+              <Card title="Workout Frequency">
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="date" />
+                    <YAxis />
+                    <Tooltip />
+                    <Legend />
+                    {workoutTypes.map((type, index) => (
+                      <Bar
+                        key={type}
+                        dataKey={type}
+                        stackId="a"
+                        fill={`hsl(${index * 60}, 70%, 50%)`}
+                      />
+                    ))}
+                  </BarChart>
+                </ResponsiveContainer>
+              </Card>
+            </Col>
+          </Row>
+
+          {/* Recent Workouts */}
+          <Card title="Recent Workouts">
+            {data?.recentWorkouts?.length ? (
+              <Table
+                dataSource={data.recentWorkouts}
+                columns={columns}
+                rowKey="_id"
+                pagination={false}
+                footer={() => (
+                  <Button type="link" onClick={() => navigate('/workout-summary')}>
+                    View All Workouts
+                  </Button>
+                )}
+              />
+            ) : (
+              <Text>No recent workouts</Text>
+            )}
+          </Card>
+
+          {/* Motivational Message */}
+          {data?.metrics?.totalWorkouts != null &&
+            data.metrics.totalWorkouts >= 10 && (
+              <Card style={{ marginTop: 24, background: '#e6f7ff' }}>
+                <Text strong>
+                  Great job! 🎉 You've completed {data.metrics.totalWorkouts} workouts!
+                </Text>
+              </Card>
+            )}
+        </>
+      )}
+    </div>
+  );
+}

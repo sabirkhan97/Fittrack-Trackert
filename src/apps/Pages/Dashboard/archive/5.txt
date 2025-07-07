@@ -1,0 +1,612 @@
+"use client";
+
+import React, { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import { motion } from 'framer-motion';
+import { format, parseISO, subDays } from 'date-fns';
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+} from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import {
+  Table,
+  TableHeader,
+  TableRow,
+  TableHead,
+  TableBody,
+  TableCell,
+} from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { CalendarIcon, Search, X, Plus, Dumbbell, Trophy } from 'lucide-react';
+import axios from 'axios';
+import { useTheme } from '@/context/theme-provider';
+import { Icons } from '@/components/icons';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Line } from 'react-chartjs-2';
+import {
+  Chart as ChartJS,
+  LineElement,
+  PointElement,
+  LinearScale,
+  TimeScale,
+  Title,
+  Tooltip,
+  Legend,
+} from 'chart.js';
+import 'chartjs-adapter-date-fns';
+import type { ChartOptions } from 'chart.js';
+
+// Register Chart.js components
+ChartJS.register(LineElement, PointElement, LinearScale, TimeScale, Title, Tooltip, Legend);
+
+interface Exercise {
+  _id: string;
+  exercise_name: string;
+  sets: number;
+  reps: number;
+  weight?: number;
+  exercise_date: string;
+  workout_type?: string;
+  muscle_group?: string;
+  set_type?: string;
+  additional_exercises?: string[];
+  notes?: string;
+}
+
+interface DashboardData {
+  metrics: {
+    totalWorkouts: number;
+    totalSets: number;
+    totalVolume: number;
+    averageWeight: number | null;
+    volumeChange: number | null;
+  };
+  frequency: { date: string; count: number }[];
+  recentExercises: Exercise[];
+  workoutTypes: string[];
+}
+
+export default function Dashboard() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { theme } = useTheme();
+  const isDarkMode = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const [filters, setFilters] = useState({
+    dateRange: { from: subDays(new Date(), 30), to: new Date() },
+    workoutType: 'all' as string,
+  });
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const token = localStorage.getItem('token');
+  if (!token) {
+    toast.error('Authentication required');
+    navigate('/login');
+    return null;
+  }
+
+  const { data, isLoading, error } = useQuery<DashboardData, Error>({
+    queryKey: ['dashboard', token, filters, searchTerm],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (filters.dateRange.from) params.append('date_start', format(filters.dateRange.from, 'yyyy-MM-dd'));
+      if (filters.dateRange.to) params.append('date_end', format(filters.dateRange.to, 'yyyy-MM-dd'));
+      if (filters.workoutType !== 'all') params.append('workout_type', filters.workoutType);
+      if (searchTerm) params.append('exercise_name', searchTerm);
+
+      const res = await axios.get(`/api/exercises?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const exercises = res.data.exercises as Exercise[];
+
+      // Fetch previous period for volume change comparison
+      const prevParams = new URLSearchParams();
+      const prevFrom = subDays(filters.dateRange.from, 30);
+      const prevTo = subDays(filters.dateRange.to, 30);
+      prevParams.append('date_start', format(prevFrom, 'yyyy-MM-dd'));
+      prevParams.append('date_end', format(prevTo, 'yyyy-MM-dd'));
+      if (filters.workoutType !== 'all') prevParams.append('workout_type', filters.workoutType);
+      if (searchTerm) prevParams.append('exercise_name', searchTerm);
+
+      const prevRes = await axios.get(`/api/exercises?${prevParams.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const prevExercises = prevRes.data.exercises as Exercise[];
+
+      const metrics = exercises.reduce(
+        (acc, ex) => ({
+          totalWorkouts: acc.totalWorkouts + 1,
+          totalSets: acc.totalSets + ex.sets,
+          totalVolume: acc.totalVolume + (ex.sets * ex.reps * (ex.weight || 0)),
+          averageWeight: acc.averageWeight + (ex.weight || 0),
+          countWithWeight: ex.weight ? acc.countWithWeight + 1 : acc.countWithWeight,
+        }),
+        { totalWorkouts: 0, totalSets: 0, totalVolume: 0, averageWeight: 0, countWithWeight: 0 }
+      );
+
+      const prevVolume = prevExercises.reduce(
+        (sum, ex) => sum + (ex.sets * ex.reps * (ex.weight || 0)),
+        0
+      );
+
+      const frequency = exercises
+        .reduce((acc, ex) => {
+          const date = format(parseISO(ex.exercise_date), 'yyyy-MM-dd');
+          const existing = acc.find(item => item.date === date);
+          if (existing) existing.count += 1;
+          else acc.push({ date, count: 1 });
+          return acc;
+        }, [] as { date: string; count: number }[])
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+      const workoutTypes = ['all', ...new Set(exercises.map(ex => ex.workout_type).filter(Boolean))] as string[];
+
+      return {
+        metrics: {
+          totalWorkouts: metrics.totalWorkouts,
+          totalSets: metrics.totalSets,
+          totalVolume: metrics.totalVolume,
+          averageWeight: metrics.countWithWeight ? metrics.averageWeight / metrics.countWithWeight : null,
+          volumeChange: prevVolume ? ((metrics.totalVolume - prevVolume) / prevVolume) * 100 : null,
+        },
+        frequency,
+        recentExercises: exercises.slice(0, 5),
+        workoutTypes,
+      };
+    },
+    retry: 1,
+    staleTime: 1000 * 60 * 5,
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await axios.delete(`/api/exercises/${id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    },
+    onSuccess: () => {
+      toast.success('Exercise deleted');
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+    onError: (error: any) => {
+      toast.error('Failed to delete exercise', {
+        description: error.response?.data?.error || 'Try again',
+      });
+      if (error.response?.status === 401 || error.response?.status === 403) {
+        localStorage.removeItem('token');
+        navigate('/login');
+      }
+    },
+  });
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    queryClient.clear();
+    toast.success('Logged out successfully');
+    navigate('/login');
+  };
+
+  const clearFilters = () => {
+    setSearchTerm('');
+    setFilters({
+      dateRange: { from: subDays(new Date(), 30), to: new Date() },
+      workoutType: 'all',
+    });
+  };
+
+  const chartData = useMemo(() => ({
+    datasets: [
+      {
+        label: 'Reps',
+        data: [
+          { x: '2025-07-04', y: 10 },
+          { x: '2025-07-11', y: 7 },
+          { x: '2025-07-17', y: 10 },
+          { x: '2025-07-21', y: 8 },
+        ],
+        borderColor: '#10b981',
+        backgroundColor: 'rgba(16, 185, 129, 0.2)',
+        fill: true,
+        tension: 0.3,
+        yAxisID: 'y1',
+      },
+      {
+        label: 'Weight (kg)',
+        data: [
+          { x: '2025-07-04', y: 60 },
+          { x: '2025-07-11', y: 70 },
+          { x: '2025-07-17', y: 70 },
+          { x: '2025-07-21', y: 80 },
+        ],
+        borderColor: '#facc15',
+        backgroundColor: 'rgba(250, 204, 21, 0.2)',
+        fill: true,
+        tension: 0.3,
+        yAxisID: 'y2',
+      },
+    ],
+  }), []);
+
+  const chartOptions: ChartOptions<'line'> = {
+    scales: {
+      x: {
+        type: 'time',
+        time: {
+          unit: 'day',
+          displayFormats: { day: 'MMM d' },
+        },
+        title: {
+          display: true,
+          text: 'Date',
+        },
+      },
+      y1: {
+        type: 'linear',
+        position: 'left',
+        beginAtZero: true,
+        title: {
+          display: true,
+          text: 'Reps',
+        },
+        ticks: {
+          stepSize: 1,
+        },
+      },
+      y2: {
+        type: 'linear',
+        position: 'right',
+        beginAtZero: true,
+        title: {
+          display: true,
+          text: 'Weight (kg)',
+        },
+        ticks: {
+          stepSize: 10,
+        },
+        grid: {
+          drawOnChartArea: false,
+        },
+      },
+    },
+    plugins: {
+      legend: {
+        position: 'top',
+      },
+      title: {
+        display: true,
+        text: 'Bench Press Progress (Jul 2025)',
+      },
+    },
+  };
+
+  return (
+    <div className={`min-h-screen ${isDarkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
+      <div className={`absolute inset-0 overflow-hidden opacity-20 ${isDarkMode ? 'bg-gradient-to-br from-purple-900/30 to-gray-800/50' : 'bg-gradient-to-br from-emerald-50 to-blue-50'}`}></div>
+      <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur">
+        <div className="container flex h-16 items-center justify-between px-4">
+          <div className="flex items-center gap-2">
+            <Dumbbell className="h-6 w-6 text-emerald-600" />
+            <span className="text-lg font-semibold">WorkoutGenAI</span>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('/gym-notes')}
+              className={`${isDarkMode ? 'border-gray-700 hover:bg-gray-800' : 'border-emerald-200 hover:bg-emerald-100'}`}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Add Workout
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('/workout-summary')}
+              className={`${isDarkMode ? 'border-gray-700 hover:bg-gray-800' : 'border-emerald-200 hover:bg-emerald-100'}`}
+            >
+              <Icons.barChart className="mr-2 h-4 w-4" />
+              Summary
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleLogout}
+              className={`${isDarkMode ? 'border-red-900/30 hover:bg-red-900/10 text-red-400' : 'border-red-200 hover:bg-red-100 text-red-600'}`}
+            >
+              <Icons.logout className="mr-2 h-4 w-4" />
+              Sign Out
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      <main className="container px-4 py-8">
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="space-y-6">
+          <Card className={`border-0 shadow-lg ${isDarkMode ? 'bg-gray-800/90 border-gray-700' : 'bg-white border-gray-200'}`}>
+            <CardHeader>
+              <CardTitle className="text-lg">Filters</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search exercises..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className={`pl-9 ${isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-200'}`}
+                  />
+                  {searchTerm && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setSearchTerm('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 h-7 w-7"
+                    >
+                      <X size={14} />
+                    </Button>
+                  )}
+                </div>
+                <Select
+                  value={filters.workoutType}
+                  onValueChange={(value) => setFilters({ ...filters, workoutType: value })}
+                >
+                  <SelectTrigger className={isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-200'}>
+                    <SelectValue placeholder="Workout Type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {data?.workoutTypes.map((type) => (
+                      <SelectItem key={type} value={type}>
+                        {type === 'all' ? 'All Types' : type}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <div className="flex items-center gap-3">
+                  <div className="flex-1">
+                    <label className={`block text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'} mb-1`}>From</label>
+                    <div className="relative">
+                      <Input
+                        type="date"
+                        value={filters.dateRange.from ? format(filters.dateRange.from, 'yyyy-MM-dd') : ''}
+                        onChange={(e) =>
+                          setFilters({
+                            ...filters,
+                            dateRange: {
+                              from: e.target.value ? new Date(e.target.value) : subDays(new Date(), 30),
+                              to: filters.dateRange.to,
+                            },
+                          })
+                        }
+                        className={`pl-10 ${isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-200'}`}
+                        max={filters.dateRange.to ? format(filters.dateRange.to, 'yyyy-MM-dd') : undefined}
+                      />
+                      <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-center pt-5">
+                    <span className="text-gray-400">→</span>
+                  </div>
+                  <div className="flex-1">
+                    <label className={`block text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'} mb-1`}>To</label>
+                    <div className="relative">
+                      <Input
+                        type="date"
+                        value={filters.dateRange.to ? format(filters.dateRange.to, 'yyyy-MM-dd') : ''}
+                        onChange={(e) =>
+                          setFilters({
+                            ...filters,
+                            dateRange: {
+                              from: filters.dateRange.from,
+                              to: e.target.value ? new Date(e.target.value) : new Date(),
+                            },
+                          })
+                        }
+                        className={`pl-10 ${isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-200'}`}
+                        min={filters.dateRange.from ? format(filters.dateRange.from, 'yyyy-MM-dd') : undefined}
+                      />
+                      <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              {(searchTerm || filters.workoutType !== 'all' || filters.dateRange.from !== subDays(new Date(), 30) || filters.dateRange.to !== new Date()) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearFilters}
+                  className={`mt-4 ${isDarkMode ? 'text-gray-400 hover:text-gray-200' : 'text-gray-600 hover:text-gray-800'}`}
+                >
+                  Clear Filters
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+
+          {isLoading ? (
+            <div className="grid gap-6">
+              <div className="grid gap-4 md:grid-cols-4">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <Card key={i} className="border-0 shadow-lg">
+                    <CardHeader>
+                      <Skeleton className="h-4 w-24" />
+                      <Skeleton className="h-8 w-16" />
+                    </CardHeader>
+                  </Card>
+                ))}
+              </div>
+              <Card className="border-0 shadow-lg">
+                <CardHeader>
+                  <Skeleton className="h-4 w-32" />
+                </CardHeader>
+                <CardContent>
+                  <Skeleton className="h-64 w-full" />
+                </CardContent>
+              </Card>
+              <Card className="border-0 shadow-lg">
+                <CardHeader>
+                  <Skeleton className="h-4 w-32" />
+                </CardHeader>
+                <CardContent>
+                  <Skeleton className="h-20 w-full" />
+                </CardContent>
+              </Card>
+            </div>
+          ) : error ? (
+            <Card className={`border-0 shadow-lg ${isDarkMode ? 'bg-gray-800/90 border-gray-700' : 'bg-white border-gray-200'}`}>
+              <CardHeader>
+                <CardTitle>Error Loading Data</CardTitle>
+                <CardDescription>{error.message}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button onClick={() => queryClient.refetchQueries({ queryKey: ['dashboard'] })}>
+                  Retry
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <motion.div className="space-y-6">
+              <div className="grid gap-4 md:grid-cols-4">
+                <Card className={`border-0 shadow-lg ${isDarkMode ? 'bg-gray-800/90 border-gray-700' : 'bg-white border-gray-200'}`}>
+                  <CardHeader className="pb-2">
+                    <CardDescription>Total Workouts</CardDescription>
+                    <CardTitle className="text-3xl">{data?.metrics.totalWorkouts || 0}</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-xs text-muted-foreground">Logged exercises</div>
+                  </CardContent>
+                </Card>
+                <Card className={`border-0 shadow-lg ${isDarkMode ? 'bg-gray-800/90 border-gray-700' : 'bg-white border-gray-200'}`}>
+                  <CardHeader className="pb-2">
+                    <CardDescription>Total Sets</CardDescription>
+                    <CardTitle className="text-3xl">{data?.metrics.totalSets || 0}</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-xs text-muted-foreground">Across all workouts</div>
+                  </CardContent>
+                </Card>
+                <Card className={`border-0 shadow-lg ${isDarkMode ? 'bg-gray-800/90 border-gray-700' : 'bg-white border-gray-200'}`}>
+                  <CardHeader className="pb-2">
+                    <CardDescription>Total Volume</CardDescription>
+                    <CardTitle className="text-3xl">{data?.metrics.totalVolume.toFixed(0) || 0} kg</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-xs text-muted-foreground">Sets × Reps × Weight</div>
+                  </CardContent>
+                </Card>
+                <Card className={`border-0 shadow-lg ${isDarkMode ? 'bg-gray-800/90 border-gray-700' : 'bg-white border-gray-200'}`}>
+                  <CardHeader className="pb-2">
+                    <CardDescription>Volume Change</CardDescription>
+                    <CardTitle className="text-3xl">
+                      {data?.metrics.volumeChange ? (
+                        <span className={data.metrics.volumeChange > 0 ? 'text-emerald-600' : 'text-red-600'}>
+                          {data.metrics.volumeChange > 0 ? '+' : ''}{data.metrics.volumeChange.toFixed(1)}%
+                        </span>
+                      ) : (
+                        'N/A'
+                      )}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-xs text-muted-foreground">vs. previous 30 days</div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <Card className={`border-0 shadow-lg ${isDarkMode ? 'bg-gray-800/90 border-gray-700' : 'bg-white border-gray-200'}`}>
+                <CardHeader>
+                  <CardTitle>Workout Progress</CardTitle>
+                  <CardDescription>Reps and Weight for Bench Press</CardDescription>
+                </CardHeader>
+                <CardContent className="h-80">
+                  <Line data={chartData} options={chartOptions} />
+                </CardContent>
+              </Card>
+
+              <Card className={`border-0 shadow-lg ${isDarkMode ? 'bg-gray-800/90 border-gray-700' : 'bg-white border-gray-200'}`}>
+                <CardHeader>
+                  <CardTitle>Recent Workouts</CardTitle>
+                  <CardDescription>Your latest logged exercises</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Exercise</TableHead>
+                        <TableHead>Sets</TableHead>
+                        <TableHead>Reps</TableHead>
+                        <TableHead>Weight</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead>Muscle</TableHead>
+                        <TableHead>Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {data?.recentExercises.map((ex) => (
+                        <TableRow key={ex._id}>
+                          <TableCell>{format(parseISO(ex.exercise_date), 'MMM dd')}</TableCell>
+                          <TableCell className="font-medium">{ex.exercise_name}</TableCell>
+                          <TableCell>{ex.sets}</TableCell>
+                          <TableCell>{ex.reps}</TableCell>
+                          <TableCell>{ex.weight ? `${ex.weight} kg` : '-'}</TableCell>
+                          <TableCell>{ex.workout_type || '-'}</TableCell>
+                          <TableCell>{ex.muscle_group || '-'}</TableCell>
+                          <TableCell>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => deleteMutation.mutate(ex._id)}
+                              className={`${isDarkMode ? 'text-red-400 hover:bg-red-900/20' : 'text-red-600 hover:bg-red-100'}`}
+                            >
+                              <Icons.trash className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {!data?.recentExercises.length && (
+                        <TableRow>
+                          <TableCell colSpan={8} className="text-center">
+                            No workouts found. Add one to get started!
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+
+              {data?.metrics?.totalWorkouts && data.metrics.totalWorkouts >= 10 && (
+                <Card className={`border-emerald-500 bg-emerald-50/50 ${isDarkMode ? 'bg-emerald-900/30 border-emerald-700' : ''}`}>
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Trophy className="h-5 w-5 text-emerald-600" />
+                      Workout Milestone
+                    </CardTitle>
+                    <CardDescription>
+                      You've completed {data.metrics.totalWorkouts} workouts! Keep it up!
+                    </CardDescription>
+                  </CardHeader>
+                </Card>
+              )}
+            </motion.div>
+          )}
+        </motion.div>
+      </main>
+    </div>
+  );
+}

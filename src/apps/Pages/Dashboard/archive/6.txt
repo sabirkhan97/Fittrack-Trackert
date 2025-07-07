@@ -1,0 +1,646 @@
+"use client";
+
+import React, { useState, useMemo, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { format, parseISO, subDays } from "date-fns";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableHeader,
+  TableRow,
+  TableHead,
+  TableBody,
+  TableCell,
+} from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { CalendarIcon, Search, X, Plus, Dumbbell, Loader2 } from "lucide-react";
+import axios from "axios";
+import type { AxiosResponse } from "axios";
+import { useTheme } from "@/context/theme-provider";
+import { Icons } from "@/components/icons";
+import { Skeleton } from "@/components/ui/skeleton";
+
+// Import and register Chart.js components
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+  TimeScale,
+  Filler,
+  LineController,
+} from 'chart.js';
+import 'chartjs-adapter-date-fns';
+import { Chart } from 'chart.js/auto';
+
+// Register all components
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+  TimeScale,
+  Filler,
+  LineController,
+);
+
+interface Exercise {
+  _id: string;
+  exercise_name: string;
+  sets: number;
+  reps: number;
+  weight?: number;
+  exercise_date: string;
+  workout_type?: string;
+  muscle_group?: string;
+}
+
+interface ApiResponse {
+  exercises: Exercise[];
+  workoutTypes?: string[];
+}
+
+interface ChartData {
+  labels: string[];
+  datasets: {
+    label: string;
+    data: number[];
+    borderColor: string;
+    backgroundColor: string;
+    borderWidth?: number;
+    tension?: number;
+    fill?: boolean;
+    yAxisID?: string;
+  }[];
+}
+
+// Debounce hook to delay search input
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  useEffect(() => {
+    const handler = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(handler);
+  }, [value, delay]);
+  return debouncedValue;
+}
+
+// Custom Chart Component with proper cleanup
+const ExerciseChart = ({ data, options }: { data: ChartData, options: any }) => {
+  const chartRef = useRef<ChartJS | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    if (canvasRef.current) {
+      const ctx = canvasRef.current.getContext('2d');
+      if (ctx) {
+        if (chartRef.current) {
+          chartRef.current.destroy();
+        }
+        chartRef.current = new ChartJS(ctx, {
+          type: 'line',
+          data,
+          options,
+        });
+      }
+    }
+
+    return () => {
+      if (chartRef.current) {
+        chartRef.current.destroy();
+      }
+    };
+  }, [data, options]);
+
+  return <canvas ref={canvasRef} />;
+};
+
+const Dashboard = () => {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { theme } = useTheme();
+  const isDarkMode = theme === "dark" ||
+    (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+
+  const [filters, setFilters] = useState({
+    dateRange: { from: subDays(new Date(), 30), to: new Date() },
+    workoutType: "all",
+    exerciseName: "all",
+  });
+  const [searchTerm, setSearchTerm] = useState("");
+  const debouncedSearchTerm = useDebounce(searchTerm, 500);
+  const [isClient, setIsClient] = useState(false);
+
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
+  useEffect(() => {
+    if (isClient && !localStorage.getItem("token")) {
+      toast.error("Session expired. Please log in again.");
+      navigate("/login");
+    }
+  }, [isClient, navigate]);
+
+  const { data, isLoading, error } = useQuery<{ exercises: Exercise[], workoutTypes: string[], exerciseNames: string[] }, Error>({
+    queryKey: ["dashboard", filters, debouncedSearchTerm],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      params.append("date_start", format(filters.dateRange.from, "yyyy-MM-dd"));
+      params.append("date_end", format(filters.dateRange.to, "yyyy-MM-dd"));
+      if (filters.workoutType !== "all") params.append("workout_type", filters.workoutType);
+      if (filters.exerciseName !== "all") params.append("exercise_name", filters.exerciseName);
+      if (debouncedSearchTerm) params.append("exercise_name", debouncedSearchTerm);
+
+      const res: AxiosResponse<ApiResponse> = await axios.get(`/api/exercises?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+      });
+
+      return {
+        exercises: res.data.exercises || [],
+        workoutTypes: ["all", ...new Set(res.data.exercises.map((ex) => ex.workout_type).filter((type): type is string => type !== undefined) || [])],
+        exerciseNames: ["all", ...new Set(res.data.exercises.map((ex) => ex.exercise_name))],
+      };
+    },
+    staleTime: 1000 * 60 * 5,
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await axios.delete(`/api/exercises/${id}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+      });
+    },
+    onSuccess: () => {
+      toast.success("Exercise deleted");
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.error || "Failed to delete exercise");
+      if (error.response?.status === 401) {
+        localStorage.removeItem("token");
+        navigate("/login");
+      }
+    },
+  });
+
+  const clearFilters = () => {
+    setSearchTerm("");
+    setFilters({
+      dateRange: { from: subDays(new Date(), 30), to: new Date() },
+      workoutType: "all",
+      exerciseName: "all",
+    });
+  };
+
+  const metrics = useMemo(() => {
+    if (!data?.exercises.length) return {
+      totalWorkouts: 0,
+      totalSets: 0,
+      totalVolume: 0,
+      uniqueExercises: 0,
+      workoutFrequency: 0,
+    };
+
+    const result = data.exercises.reduce((acc, ex) => ({
+      totalWorkouts: acc.totalWorkouts + 1,
+      totalSets: acc.totalSets + ex.sets,
+      totalVolume: acc.totalVolume + (ex.sets * ex.reps * (ex.weight || 0)),
+    }), { totalWorkouts: 0, totalSets: 0, totalVolume: 0 });
+
+    const days = Math.ceil(
+      (filters.dateRange.to.getTime() - filters.dateRange.from.getTime()) / (1000 * 60 * 60 * 24)
+    ) || 1;
+
+    return {
+      ...result,
+      uniqueExercises: new Set(data.exercises.map(ex => ex.exercise_name)).size,
+      workoutFrequency: (result.totalWorkouts / (days / 7)).toFixed(1),
+    };
+  }, [data?.exercises, filters.dateRange]);
+
+  const exerciseTrendData: ChartData = useMemo(() => {
+    if (!data?.exercises.length || (!debouncedSearchTerm.trim() && filters.exerciseName === "all")) return { labels: [], datasets: [] };
+
+    const filtered = data.exercises
+      .filter(ex => 
+        (debouncedSearchTerm 
+          ? ex.exercise_name.toLowerCase().includes(debouncedSearchTerm.toLowerCase())
+          : filters.exerciseName === "all" || ex.exercise_name === filters.exerciseName
+        ))
+      .sort((a, b) => new Date(a.exercise_date).getTime() - new Date(b.exercise_date).getTime());
+
+    return {
+      labels: filtered.map(ex => format(parseISO(ex.exercise_date), "MMM d")),
+      datasets: [
+        {
+          label: "Reps",
+          data: filtered.map(ex => ex.reps),
+          borderColor: isDarkMode ? "#f97316" : "#e86c11",
+          backgroundColor: isDarkMode ? "rgba(249, 115, 22, 0.1)" : "rgba(232, 108, 17, 0.1)",
+          borderWidth: 2,
+          tension: 0.4,
+          fill: true,
+          yAxisID: "y",
+        },
+        {
+          label: "Weight (kg)",
+          data: filtered.map(ex => ex.weight || 0),
+          borderColor: isDarkMode ? "#3b82f6" : "#2563eb",
+          backgroundColor: isDarkMode ? "rgba(59, 130, 246, 0.1)" : "rgba(37, 99, 235, 0.1)",
+          borderWidth: 2,
+          tension: 0.4,
+          fill: true,
+          yAxisID: "y1",
+        },
+      ],
+    };
+  }, [data?.exercises, debouncedSearchTerm, filters.exerciseName, isDarkMode]);
+
+  const exerciseTrendOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        position: "top",
+        labels: { color: isDarkMode ? "#e5e7eb" : "#374151" }
+      },
+      tooltip: {
+        backgroundColor: isDarkMode ? "#1f2937" : "#ffffff",
+        titleColor: isDarkMode ? "#f3f4f6" : "#111827",
+        bodyColor: isDarkMode ? "#d1d5db" : "#4b5563",
+      },
+    },
+    scales: {
+      x: {
+        type: 'category',
+        grid: { display: false },
+        ticks: { color: isDarkMode ? "#9ca3af" : "#6b7280" }
+      },
+      y: {
+        position: "left",
+        ticks: { color: isDarkMode ? "#9ca3af" : "#6b7280" },
+        grid: { color: isDarkMode ? "rgba(156, 163, 175, 0.1)" : "rgba(107, 114, 128, 0.1)" },
+      },
+      y1: {
+        position: "right",
+        grid: { drawOnChartArea: false },
+        ticks: { color: isDarkMode ? "#9ca3af" : "#6b7280" },
+      },
+    },
+  };
+
+  if (!isClient) return null;
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background p-4">
+        <div className="grid gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {[...Array(4)].map((_, i) => (
+              <Skeleton key={i} className="h-10 w-full" />
+            ))}
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {[...Array(4)].map((_, i) => (
+              <Card key={i} className="border-0 shadow-sm">
+                <CardHeader className="pb-2">
+                  <Skeleton className="h-4 w-24" />
+                  <Skeleton className="h-8 w-16 mt-2" />
+                </CardHeader>
+              </Card>
+            ))}
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {[...Array(2)].map((_, i) => (
+              <Card key={i} className="border-0 shadow-sm">
+                <CardHeader>
+                  <Skeleton className="h-5 w-32" />
+                </CardHeader>
+                <CardContent>
+                  <Skeleton className="h-64 w-full rounded-lg" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <Card className="w-full max-w-md border-0 shadow-lg">
+          <CardHeader>
+            <CardTitle className="text-red-600">Error Loading Data</CardTitle>
+            <CardDescription>{error.message}</CardDescription>
+          </CardHeader>
+          <CardContent className="flex gap-4">
+            <Button onClick={() => queryClient.refetchQueries({ queryKey: ["dashboard"] })}>
+              Retry
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                localStorage.removeItem("token");
+                navigate("/login");
+              }}
+            >
+              Sign Out
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-background">
+      <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur">
+        <div className="container flex h-16 items-center justify-between px-4">
+          <div className="flex items-center gap-2">
+            <Dumbbell className="h-6 w-6 text-primary" />
+            <span className="text-lg font-semibold">WorkoutTracker</span>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => navigate("/gym-notes")}>
+              <Plus className="mr-2 h-4 w-4" />
+              New Workout
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                localStorage.removeItem("token");
+                navigate("/login");
+              }}
+            >
+              Sign Out
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      <main className="container px-4 py-8">
+        <div className="space-y-8">
+          <Card className="border-0 shadow-sm">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg">Filters</CardTitle>
+                {(searchTerm || filters.workoutType !== "all" || filters.exerciseName !== "all") && (
+                  <Button variant="ghost" size="sm" onClick={clearFilters}>
+                    Clear Filters
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 md:grid-cols-4">
+                {/* <div className="space-y-2">
+                  <label className="text-sm font-medium text-muted-foreground">Search Exercises</label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Bench press, squats..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-9"
+                    />
+                    {searchTerm && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setSearchTerm("")}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 h-7 w-7"
+                      >
+                        <X size={14} />
+                      </Button>
+                    )}
+                  </div>
+                </div> */}
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-muted-foreground">Exercise Name</label>
+                  <Select
+                    value={filters.exerciseName}
+                    onValueChange={(value) => setFilters({ ...filters, exerciseName: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select exercise" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {data?.exerciseNames.map((name) => (
+                        <SelectItem key={name} value={name}>
+                          {name === "all" ? "All Exercises" : name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-muted-foreground">Workout Type</label>
+                  <Select
+                    value={filters.workoutType}
+                    onValueChange={(value) => setFilters({ ...filters, workoutType: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {data?.workoutTypes.map((type) => (
+                        <SelectItem key={type} value={type}>
+                          {type === "all" ? "All Types" : type}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-muted-foreground">Date Range</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="relative">
+                      <Input
+                        type="date"
+                        value={format(filters.dateRange.from, "yyyy-MM-dd")}
+                        onChange={(e) => setFilters({
+                          ...filters,
+                          dateRange: {
+                            from: e.target.value ? new Date(e.target.value) : subDays(new Date(), 30),
+                            to: filters.dateRange.to
+                          }
+                        })}
+                        className="pl-10"
+                        max={format(filters.dateRange.to, "yyyy-MM-dd")}
+                      />
+                      <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    </div>
+                    <div className="relative">
+                      <Input
+                        type="date"
+                        value={format(filters.dateRange.to, "yyyy-MM-dd")}
+                        onChange={(e) => setFilters({
+                          ...filters,
+                          dateRange: {
+                            from: filters.dateRange.from,
+                            to: e.target.value ? new Date(e.target.value) : new Date()
+                          }
+                        })}
+                        className="pl-10"
+                        min={format(filters.dateRange.from, "yyyy-MM-dd")}
+                      />
+                      <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="grid gap-4 md:grid-cols-4">
+            <Card className="border-0 shadow-sm hover:shadow-md transition-shadow">
+              <CardHeader className="pb-2">
+                <CardDescription className="flex items-center gap-2">
+                  <Icons.activity className="h-4 w-4 text-emerald-600" />
+                  Total Workouts
+                </CardDescription>
+                <CardTitle className="text-3xl">{metrics.totalWorkouts}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-xs text-muted-foreground">{metrics.workoutFrequency} workouts/week</p>
+              </CardContent>
+            </Card>
+
+            <Card className="border-0 shadow-sm hover:shadow-md transition-shadow">
+              <CardHeader className="pb-2">
+                <CardDescription className="flex items-center gap-2">
+                  <Icons.layers className="h-4 w-4 text-blue-600" />
+                  Total Sets
+                </CardDescription>
+                <CardTitle className="text-3xl">{metrics.totalSets}</CardTitle>
+              </CardHeader>
+            </Card>
+
+            <Card className="border-0 shadow-sm hover:shadow-md transition-shadow">
+              <CardHeader className="pb-2">
+                <CardDescription className="flex items-center gap-2">
+                  <Icons.dumbbell />
+                  Total Volume
+                </CardDescription>
+                <CardTitle className="text-3xl">{metrics.totalVolume.toLocaleString()} kg</CardTitle>
+              </CardHeader>
+            </Card>
+
+            <Card className="border-0 shadow-sm hover:shadow-md transition-shadow">
+              <CardHeader className="pb-2">
+                <CardDescription className="flex items-center gap-2">
+                  <Icons.list className="h-4 w-4 text-purple-600" />
+                  Unique Exercises
+                </CardDescription>
+                <CardTitle className="text-3xl">{metrics.uniqueExercises}</CardTitle>
+              </CardHeader>
+            </Card>
+          </div>
+
+          {((debouncedSearchTerm && exerciseTrendData.datasets.length > 0) || (filters.exerciseName !== "all")) && (
+            <Card className="border-0 shadow-sm">
+              <CardHeader>
+                <CardTitle>{debouncedSearchTerm || filters.exerciseName === "all" ? "Exercise" : filters.exerciseName} Progress</CardTitle>
+                <CardDescription>Reps and weight over time</CardDescription>
+              </CardHeader>
+              <CardContent className="h-80">
+                <ExerciseChart
+                  data={exerciseTrendData}
+                  options={exerciseTrendOptions}
+                />
+              </CardContent>
+            </Card>
+          )}
+
+          <Card className="border-0 shadow-sm">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Recent Workouts</CardTitle>
+                  <CardDescription>Your exercise history</CardDescription>
+                </div>
+                <Badge variant="outline">{metrics.uniqueExercises} exercises</Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Exercise</TableHead>
+                    <TableHead>Sets</TableHead>
+                    <TableHead>Reps</TableHead>
+                    <TableHead>Weight</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data?.exercises.slice(0, 10).map((ex) => (
+                    <TableRow key={ex._id} className="group">
+                      <TableCell>{format(parseISO(ex.exercise_date), "MMM d")}</TableCell>
+                      <TableCell className="font-medium">{ex.exercise_name}</TableCell>
+                      <TableCell>{ex.sets}</TableCell>
+                      <TableCell>{ex.reps}</TableCell>
+                      <TableCell>{ex.weight ? `${ex.weight} kg` : "-"}</TableCell>
+                      <TableCell>{ex.workout_type || "-"}</TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => deleteMutation.mutate(ex._id)}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                          disabled={deleteMutation.isPending}
+                        >
+                          {deleteMutation.isPending ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Icons.trash className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </div>
+      </main>
+    </div>
+  );
+};
+
+export default Dashboard;

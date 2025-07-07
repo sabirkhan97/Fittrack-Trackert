@@ -1,0 +1,1141 @@
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import { z } from 'zod';
+import api from '@/api/api';
+import { motion, AnimatePresence } from 'framer-motion';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Label } from '@/components/ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Progress } from '@/components/ui/progress';
+import { Separator } from '@/components/ui/separator';
+import { Switch } from '@/components/ui/switch';
+import { Icons } from '@/components/icons';
+import dayjs from 'dayjs';
+
+// Interface for full diet plan (including backend-generated fields)
+interface DietPlan {
+  _id: string;
+  date: string;
+  meals: {
+    meal_time: string;
+    items: string[];
+  }[];
+  notes: string;
+  prompt?: string;
+  user?: string;
+  createdAt?: string;
+}
+
+// Interface for save payload (matches backend /api/diet-plans/save)
+interface DietPlanPayload {
+  date: string;
+  meals: {
+    meal_time: string;
+    items: string[];
+  }[];
+  notes?: string;
+  prompt?: string;
+}
+
+// Zod schema for validating diet plan payload
+const DietPlanPayloadSchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format'),
+  meals: z.array(
+    z.object({
+      meal_time: z.string().min(1, 'Meal time cannot be empty'),
+      items: z.array(z.string().min(1, 'Item cannot be empty')).min(1, 'At least one item required'),
+    })
+  ).min(1, 'At least one meal required'),
+  notes: z.string().optional(),
+  prompt: z.string().optional(),
+});
+
+export default function DietGenerator() {
+  const [tabKey, setTabKey] = useState('diet');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [countdown, setCountdown] = useState(90);
+  const [showLoadingModal, setShowLoadingModal] = useState(false);
+  const [loadingMessages] = useState([
+    "Our AI nutritionists are crafting your perfect meal plan...",
+    "Analyzing your dietary preferences and health goals...",
+    "Optimizing macronutrient balance for your body type...",
+    "Personalizing recipes based on your location and budget...",
+    "Finalizing your customized nutrition plan..."
+  ]);
+  const [currentMessageIndex, setCurrentMessageIndex] = useState(0);
+
+  // Form state
+  const [message, setMessage] = useState('');
+  const [age, setAge] = useState<number | null>(null);
+  const [gender, setGender] = useState<string>();
+  const [height, setHeight] = useState<number | null>(null);
+  const [weight, setWeight] = useState<number | null>(null);
+  const [goal, setGoal] = useState<string>();
+  const [bodyType, setBodyType] = useState<string>();
+  const [budget, setBudget] = useState<string>();
+  const [isVegetarian, setIsVegetarian] = useState<boolean>(false);
+  const [proteinGoal, setProteinGoal] = useState<string>();
+  const [country, setCountry] = useState<string>();
+  const [city, setCity] = useState<string>();
+  const [foodPreferences, setFoodPreferences] = useState<string[]>([]);
+  const [healthConditions, setHealthConditions] = useState<string[]>([]);
+  const [activityLevel, setActivityLevel] = useState<string>();
+  const [lifestyle, setLifestyle] = useState<string>();
+  const [mealFrequency, setMealFrequency] = useState<string>();
+  const [favoriteCuisines, setFavoriteCuisines] = useState<string[]>([]);
+  const [snackPreferences, setSnackPreferences] = useState<string[]>([]);
+  const [foodRestrictions, setFoodRestrictions] = useState<string[]>([]);
+  const [bodyFatPercentage, setBodyFatPercentage] = useState<number | null>(null);
+  const [cookingTimePreference, setCookingTimePreference] = useState<string>();
+  const [supplements, setSupplements] = useState<string[]>([]);
+  const [preferredMealTimes, setPreferredMealTimes] = useState<string[]>([]);
+  const [fitnessExperience, setFitnessExperience] = useState<string>();
+  const [previousDietExperience, setPreviousDietExperience] = useState<string[]>([]);
+  const [dietBudgetFrequency, setDietBudgetFrequency] = useState<string>();
+  const [mealPrepExperience, setMealPrepExperience] = useState<string>();
+  const [sleepQuality, setSleepQuality] = useState<string>();
+  const [stressLevel, setStressLevel] = useState<string>();
+  const [hydrationLevel, setHydrationLevel] = useState<string>();
+
+  const navigate = useNavigate();
+
+  // Fetch saved diet plans
+  const { data: savedPlans, refetch } = useQuery<DietPlan[]>({
+    queryKey: ['dietPlans'],
+    queryFn: async () => {
+      const res = await api.get('/api/diet-plans/my', {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      return res.data.plans;
+    }
+  });
+
+  // Countdown effect
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (showLoadingModal && countdown > 0) {
+      timer = setTimeout(() => setCountdown(countdown - 1), 1000);
+
+      if (countdown % 15 === 0) {
+        setCurrentMessageIndex((prev) =>
+          prev === loadingMessages.length - 1 ? 0 : prev + 1
+        );
+      }
+    } else if (countdown === 0) {
+      setShowLoadingModal(false);
+    }
+    return () => clearTimeout(timer);
+  }, [countdown, showLoadingModal]);
+
+  const generateDiet = useMutation({
+    mutationFn: async () => {
+      const prompt = `
+        ${message}
+        ${age ? `Age: ${age}.` : ''}
+        ${gender ? `Gender: ${gender}.` : ''}
+        ${height ? `Height: ${height} cm.` : ''}
+        ${weight ? `Weight: ${weight} kg.` : ''}
+        ${goal ? `Goal: ${goal}.` : ''}
+        ${bodyType ? `Body Type: ${bodyType}.` : ''}
+        ${budget ? `Budget: ${budget}.` : ''}
+        ${isVegetarian ? 'Vegetarian: Yes.' : 'Vegetarian: No.'}
+        ${proteinGoal ? `Protein Goal: ${proteinGoal}.` : ''}
+        ${country ? `Country: ${country}.` : ''}
+        ${city ? `City: ${city}.` : ''}
+        ${foodPreferences.length > 0 ? `Food Preferences: ${foodPreferences.join(', ')}.` : ''}
+        ${healthConditions.length > 0 ? `Health Conditions: ${healthConditions.join(', ')}.` : ''}
+        ${activityLevel ? `Activity Level: ${activityLevel}.` : ''}
+        ${lifestyle ? `Lifestyle: ${lifestyle}.` : ''}
+        ${mealFrequency ? `Meal Frequency: ${mealFrequency}.` : ''}
+        ${favoriteCuisines.length > 0 ? `Favorite Cuisines: ${favoriteCuisines.join(', ')}.` : ''}
+        ${snackPreferences.length > 0 ? `Snack Preferences: ${snackPreferences.join(', ')}.` : ''}
+        ${foodRestrictions.length > 0 ? `Food Restrictions: ${foodRestrictions.join(', ')}.` : ''}
+        ${bodyFatPercentage ? `Body Fat Percentage: ${bodyFatPercentage}%.` : ''}
+        ${cookingTimePreference ? `Cooking Time Preference: ${cookingTimePreference}.` : ''}
+        ${supplements.length > 0 ? `Supplements: ${supplements.join(', ')}.` : ''}
+        ${preferredMealTimes.length > 0 ? `Preferred Meal Times: ${preferredMealTimes.join(', ')}.` : ''}
+        ${fitnessExperience ? `Fitness Experience: ${fitnessExperience}.` : ''}
+        ${previousDietExperience.length > 0 ? `Previous Diet Experience: ${previousDietExperience.join(', ')}.` : ''}
+        ${dietBudgetFrequency ? `Diet Budget Frequency: ${dietBudgetFrequency}.` : ''}
+        ${mealPrepExperience ? `Meal Prep Experience: ${mealPrepExperience}.` : ''}
+        ${sleepQuality ? `Sleep Quality: ${sleepQuality}.` : ''}
+        ${stressLevel ? `Stress Level: ${stressLevel}.` : ''}
+        ${hydrationLevel ? `Hydration Level: ${hydrationLevel}.` : ''}
+      `;
+
+      setShowLoadingModal(true);
+      setCountdown(90);
+
+      const res = await api.post(
+        '/api/diet-plans',
+        { prompt },
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      return res.data.dietPlan as DietPlan;
+    },
+    onSuccess: (data) => {
+      toast.success('Diet plan generated!', {
+        description: 'Your personalized nutrition plan is ready!',
+      });
+      refetch();
+      setShowLoadingModal(false);
+    },
+    onError: () => {
+      toast.error('Failed to generate diet plan', {
+        description: 'Please try again or contact support',
+      });
+      setShowLoadingModal(false);
+    },
+  });
+
+  const saveDietPlan = useMutation({
+    mutationFn: async (plan: DietPlanPayload) => {
+      // Validate the payload with zod
+      const payload = DietPlanPayloadSchema.parse({
+        date: plan.date,
+        meals: plan.meals.map(meal => ({
+          meal_time: meal.meal_time.trim(),
+          items: meal.items.map(item => item.trim()),
+        })),
+        notes: plan.notes?.trim(),
+        prompt: plan.prompt?.trim(),
+      });
+
+      const res = await api.post(
+        '/api/diet-plans/save',
+        payload,
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      return res.data;
+    },
+    onSuccess: (data) => {
+      toast.success('Diet plan saved!', {
+        description: 'Your diet plan has been successfully saved to your profile.',
+      });
+      refetch();
+    },
+    onError: (error: any) => {
+      const errorMessage =
+        error instanceof z.ZodError
+          ? error.errors.map(e => e.message).join(', ')
+          : error.response?.data?.details || error.message || 'An unexpected error occurred';
+      toast.error('Failed to save diet plan', {
+        description: errorMessage,
+      });
+    },
+  });
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    toast.success('Logged out successfully');
+    navigate('/login');
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-blue-50">
+      {/* Navigation */}
+      <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="container flex h-16 items-center justify-between px-4">
+          <div className="flex items-center gap-2">
+            <Icons.nutrition className="h-6 w-6 text-emerald-600" />
+            <span className="text-lg font-semibold">DietGenAI</span>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleLogout}
+              className="text-emerald-700 hover:bg-emerald-50"
+            >
+              Sign Out
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      <div className="container px-4 py-8">
+        <Tabs value={tabKey} onValueChange={setTabKey} className="w-full">
+          <TabsList className="grid w-full grid-cols-2 max-w-xs mx-auto mb-8 bg-emerald-50">
+            <TabsTrigger
+              value="diet"
+              className="data-[state=active]:bg-emerald-600 data-[state=active]:text-white"
+            >
+              Diet Generator
+            </TabsTrigger>
+            <TabsTrigger
+              value="saved"
+              className="data-[state=active]:bg-emerald-600 data-[state=active]:text-white"
+            >
+              My Plans
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="diet">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              <Card className="border-0 shadow-lg overflow-hidden">
+                <CardHeader className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white">
+                  <CardTitle className="text-2xl">Create Your Perfect Diet Plan</CardTitle>
+                  <CardDescription className="text-emerald-100">
+                    Answer a few questions to get personalized nutrition recommendations
+                  </CardDescription>
+                </CardHeader>
+
+                <CardContent className="p-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Personal Details Column */}
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="age">Age</Label>
+                          <Input
+                            id="age"
+                            type="number"
+                            value={age || ''}
+                            onChange={(e) => setAge(Number(e.target.value))}
+                            placeholder="Your age"
+                            disabled={generateDiet.isPending}
+                            className="bg-white"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor="gender">Gender</Label>
+                          <Select
+                            value={gender}
+                            onValueChange={setGender}
+                            disabled={generateDiet.isPending}
+                          >
+                            <SelectTrigger className="bg-white">
+                              <SelectValue placeholder="Select gender" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Male">Male</SelectItem>
+                              <SelectItem value="Female">Female</SelectItem>
+                              <SelectItem value="Other">Other</SelectItem>
+                              <SelectItem value="Prefer not to say">Prefer not to say</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="height">Height (cm)</Label>
+                          <Input
+                            id="height"
+                            type="number"
+                            value={height || ''}
+                            onChange={(e) => setHeight(Number(e.target.value))}
+                            placeholder="Your height"
+                            disabled={generateDiet.isPending}
+                            className="bg-white"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor="weight">Weight (kg)</Label>
+                          <Input
+                            id="weight"
+                            type="number"
+                            value={weight || ''}
+                            onChange={(e) => setWeight(Number(e.target.value))}
+                            placeholder="Your weight"
+                            disabled={generateDiet.isPending}
+                            className="bg-white"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Body Type */}
+                      <div className="space-y-2">
+                        <Label>Body Type</Label>
+                        <div className="grid grid-cols-3 gap-2">
+                          {[
+                            { value: "Ectomorph", label: "Lean" },
+                            { value: "Mesomorph", label: "Muscular" },
+                            { value: "Endomorph", label: "Stocky" }
+                          ].map((type) => (
+                            <Button
+                              key={type.value}
+                              variant={bodyType === type.value ? 'default' : 'outline'}
+                              onClick={() => setBodyType(type.value)}
+                              disabled={generateDiet.isPending}
+                              className={cn(
+                                "h-auto py-2",
+                                bodyType === type.value ? "bg-emerald-600 hover:bg-emerald-700" : "bg-white"
+                              )}
+                            >
+                              {type.label}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Diet Goals */}
+                      <div className="space-y-2">
+                        <Label>Primary Goal</Label>
+                        <Select
+                          value={goal}
+                          onValueChange={setGoal}
+                          disabled={generateDiet.isPending}
+                        >
+                          <SelectTrigger className="bg-white">
+                            <SelectValue placeholder="Select your goal" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Weight Loss">Weight Loss</SelectItem>
+                            <SelectItem value="Muscle Gain">Muscle Gain</SelectItem>
+                            <SelectItem value="Maintenance">Maintenance</SelectItem>
+                            <SelectItem value="Performance">Performance</SelectItem>
+                            <SelectItem value="Health Improvement">Health Improvement</SelectItem>
+                            <SelectItem value="Disease Management">Disease Management</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Protein Goal */}
+                      <div className="space-y-2">
+                        <Label>Protein Preference</Label>
+                        <Select
+                          value={proteinGoal}
+                          onValueChange={setProteinGoal}
+                          disabled={generateDiet.isPending}
+                        >
+                          <SelectTrigger className="bg-white">
+                            <SelectValue placeholder="Select protein level" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Low">Low Protein</SelectItem>
+                            <SelectItem value="Medium">Medium Protein</SelectItem>
+                            <SelectItem value="High">High Protein</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Vegetarian */}
+                      <div className="space-y-2">
+                        <Label>Dietary Preference</Label>
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            id="vegetarian"
+                            checked={isVegetarian}
+                            onCheckedChange={(checked) => setIsVegetarian(!!checked)}
+                            disabled={generateDiet.isPending}
+                          />
+                          <label
+                            htmlFor="vegetarian"
+                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                          >
+                            Vegetarian
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* Food Preferences */}
+                      <div className="space-y-2">
+                        <Label>Food Preferences</Label>
+                        <div className="grid grid-cols-2 gap-2">
+                          {[
+                            'Low carb', 'Low fat', 'High fiber', 'Organic',
+                            'Gluten-free', 'Dairy-free', 'Keto-friendly', 'Paleo'
+                          ].map((pref) => (
+                            <div key={pref} className="flex items-center space-x-2">
+                              <Checkbox
+                                id={pref}
+                                checked={foodPreferences.includes(pref)}
+                                onCheckedChange={(checked) => {
+                                  if (checked) {
+                                    setFoodPreferences([...foodPreferences, pref]);
+                                  } else {
+                                    setFoodPreferences(foodPreferences.filter(p => p !== pref));
+                                  }
+                                }}
+                                disabled={generateDiet.isPending}
+                              />
+                              <label
+                                htmlFor={pref}
+                                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                              >
+                                {pref}
+                              </label>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Right Column */}
+                    <div className="space-y-4">
+                      {/* Location */}
+                      <div className="space-y-2">
+                        <Label>Location</Label>
+                        <div className="grid grid-cols-2 gap-4">
+                          <Input
+                            value={country}
+                            onChange={(e) => setCountry(e.target.value)}
+                            placeholder="Country"
+                            disabled={generateDiet.isPending}
+                            className="bg-white"
+                          />
+                          <Input
+                            value={city}
+                            onChange={(e) => setCity(e.target.value)}
+                            placeholder="City (optional)"
+                            disabled={generateDiet.isPending}
+                            className="bg-white"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Budget */}
+                      <div className="space-y-2">
+                        <Label>Weekly Food Budget</Label>
+                        <Select
+                          value={budget}
+                          onValueChange={setBudget}
+                          disabled={generateDiet.isPending}
+                        >
+                          <SelectTrigger className="bg-white">
+                            <SelectValue placeholder="Select budget" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Low">Low ($50-100)</SelectItem>
+                            <SelectItem value="Medium">Medium ($100-150)</SelectItem>
+                            <SelectItem value="High">High ($150+)</SelectItem>
+                            <SelectItem value="Flexible">Flexible</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Activity Level */}
+                      <div className="space-y-2">
+                        <Label>Activity Level</Label>
+                        <Select
+                          value={activityLevel}
+                          onValueChange={setActivityLevel}
+                          disabled={generateDiet.isPending}
+                        >
+                          <SelectTrigger className="bg-white">
+                            <SelectValue placeholder="Select activity level" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Sedentary">Sedentary (little exercise)</SelectItem>
+                            <SelectItem value="Light">Light (1-3 days/week)</SelectItem>
+                            <SelectItem value="Moderate">Moderate (3-5 days/week)</SelectItem>
+                            <SelectItem value="Active">Active (6-7 days/week)</SelectItem>
+                            <SelectItem value="Athlete">Athlete (2x/day)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Lifestyle */}
+                      <div className="space-y-2">
+                        <Label>Lifestyle</Label>
+                        <Select
+                          value={lifestyle}
+                          onValueChange={setLifestyle}
+                          disabled={generateDiet.isPending}
+                        >
+                          <SelectTrigger className="bg-white">
+                            <SelectValue placeholder="Select lifestyle" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Sedentary job">Sedentary job</SelectItem>
+                            <SelectItem value="Active job">Active job</SelectItem>
+                            <SelectItem value="Student">Student</SelectItem>
+                            <SelectItem value="Remote worker">Remote worker</SelectItem>
+                            <SelectItem value="Shift worker">Shift worker</SelectItem>
+                            <SelectItem value="Retired">Retired</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Dietary Restrictions */}
+                      <div className="space-y-2">
+                        <Label>Dietary Restrictions</Label>
+                        <div className="grid grid-cols-2 gap-2">
+                          {[
+                            'Vegetarian', 'Vegan', 'Pescatarian', 'Halal',
+                            'Kosher', 'Nut allergy', 'Lactose intolerant', 'Diabetic'
+                          ].map((restriction) => (
+                            <div key={restriction} className="flex items-center space-x-2">
+                              <Checkbox
+                                id={restriction}
+                                checked={foodRestrictions.includes(restriction)}
+                                onCheckedChange={(checked) => {
+                                  if (checked) {
+                                    setFoodRestrictions([...foodRestrictions, restriction]);
+                                  } else {
+                                    setFoodRestrictions(foodRestrictions.filter(r => r !== restriction));
+                                  }
+                                }}
+                                disabled={generateDiet.isPending}
+                              />
+                              <label
+                                htmlFor={restriction}
+                                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                              >
+                                {restriction}
+                              </label>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Health Conditions */}
+                      <div className="space-y-2">
+                        <Label>Health Conditions</Label>
+                        <div className="grid grid-cols-2 gap-2">
+                          {[
+                            'Diabetes', 'High blood pressure', 'High cholesterol',
+                            'Heart disease', 'Food allergies', 'Digestive issues',
+                            'Thyroid condition', 'Autoimmune disorder'
+                          ].map((condition) => (
+                            <div key={condition} className="flex items-center space-x-2">
+                              <Checkbox
+                                id={condition}
+                                checked={healthConditions.includes(condition)}
+                                onCheckedChange={(checked) => {
+                                  if (checked) {
+                                    setHealthConditions([...healthConditions, condition]);
+                                  } else {
+                                    setHealthConditions(healthConditions.filter(c => c !== condition));
+                                  }
+                                }}
+                                disabled={generateDiet.isPending}
+                              />
+                              <label
+                                htmlFor={condition}
+                                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                              >
+                                {condition}
+                              </label>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Cuisines */}
+                      <div className="space-y-2">
+                        <Label>Favorite Cuisines</Label>
+                        <div className="flex flex-wrap gap-2">
+                          {[
+                            'Italian', 'Mexican', 'Asian', 'Mediterranean',
+                            'American', 'Indian', 'Middle Eastern', 'French',
+                            'Thai', 'Japanese', 'Chinese', 'Korean'
+                          ].map((cuisine) => (
+                            <Button
+                              key={cuisine}
+                              variant={favoriteCuisines.includes(cuisine) ? 'default' : 'outline'}
+                              size="sm"
+                              onClick={() => {
+                                if (favoriteCuisines.includes(cuisine)) {
+                                  setFavoriteCuisines(favoriteCuisines.filter(c => c !== cuisine));
+                                } else {
+                                  setFavoriteCuisines([...favoriteCuisines, cuisine]);
+                                }
+                              }}
+                              disabled={generateDiet.isPending}
+                              className={cn(
+                                "rounded-full",
+                                favoriteCuisines.includes(cuisine) ? "bg-emerald-600 hover:bg-emerald-700" : "bg-white"
+                              )}
+                            >
+                              {cuisine}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Advanced Options */}
+                  <div className="mt-6">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-lg font-medium">Advanced Options</Label>
+                      <Switch
+                        checked={showAdvanced}
+                        onCheckedChange={setShowAdvanced}
+                        disabled={generateDiet.isPending}
+                        className="data-[state=checked]:bg-emerald-600"
+                      />
+                    </div>
+
+                    {showAdvanced && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.3 }}
+                        className="mt-4 space-y-4 overflow-hidden"
+                      >
+                        <Separator className="my-4" />
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="space-y-2">
+                            <Label>Body Fat %</Label>
+                            <Input
+                              type="number"
+                              value={bodyFatPercentage || ''}
+                              onChange={(e) => setBodyFatPercentage(Number(e.target.value))}
+                              placeholder="Optional"
+                              disabled={generateDiet.isPending}
+                              className="bg-white"
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label>Meal Frequency</Label>
+                            <Select
+                              value={mealFrequency}
+                              onValueChange={setMealFrequency}
+                              disabled={generateDiet.isPending}
+                            >
+                              <SelectTrigger className="bg-white">
+                                <SelectValue placeholder="Select frequency" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="3 meals/day">3 meals/day</SelectItem>
+                                <SelectItem value="4 meals/day">4 meals/day</SelectItem>
+                                <SelectItem value="5+ meals/day">5+ meals/day</SelectItem>
+                                <SelectItem value="Intermittent fasting">Intermittent fasting</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label>Cooking Time Preference</Label>
+                            <Select
+                              value={cookingTimePreference}
+                              onValueChange={setCookingTimePreference}
+                              disabled={generateDiet.isPending}
+                            >
+                              <SelectTrigger className="bg-white">
+                                <SelectValue placeholder="Select preference" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Quick (15-30 min)">Quick (15-30 min)</SelectItem>
+                                <SelectItem value="Moderate (30-60 min)">Moderate (30-60 min)</SelectItem>
+                                <SelectItem value="Elaborate (60+ min)">Elaborate (60+ min)</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label>Supplements</Label>
+                            <div className="flex flex-wrap gap-2">
+                              {[
+                                'Protein powder', 'Multivitamin', 'Creatine', 'Omega-3',
+                                'Vitamin D', 'Pre-workout', 'BCAAs', 'Probiotics'
+                              ].map((supplement) => (
+                                <Button
+                                  key={supplement}
+                                  variant={supplements.includes(supplement) ? 'default' : 'outline'}
+                                  size="sm"
+                                  onClick={() => {
+                                    if (supplements.includes(supplement)) {
+                                      setSupplements(supplements.filter(s => s !== supplement));
+                                    } else {
+                                      setSupplements([...supplements, supplement]);
+                                    }
+                                  }}
+                                  disabled={generateDiet.isPending}
+                                  className={cn(
+                                    "rounded-full",
+                                    supplements.includes(supplement) ? "bg-emerald-600 hover:bg-emerald-700" : "bg-white"
+                                  )}
+                                >
+                                  {supplement}
+                                </Button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label>Preferred Meal Times</Label>
+                            <div className="flex flex-wrap gap-2">
+                              {[
+                                'Early breakfast', 'Late breakfast', 'Early lunch',
+                                'Late lunch', 'Early dinner', 'Late dinner', 'Snacks'
+                              ].map((time) => (
+                                <Button
+                                  key={time}
+                                  variant={preferredMealTimes.includes(time) ? 'default' : 'outline'}
+                                  size="sm"
+                                  onClick={() => {
+                                    if (preferredMealTimes.includes(time)) {
+                                      setPreferredMealTimes(preferredMealTimes.filter(t => t !== time));
+                                    } else {
+                                      setPreferredMealTimes([...preferredMealTimes, time]);
+                                    }
+                                  }}
+                                  disabled={generateDiet.isPending}
+                                  className={cn(
+                                    "rounded-full",
+                                    preferredMealTimes.includes(time) ? "bg-emerald-600 hover:bg-emerald-700" : "bg-white"
+                                  )}
+                                >
+                                  {time}
+                                </Button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="space-y-2">
+                            <Label>Sleep Quality</Label>
+                            <Select
+                              value={sleepQuality}
+                              onValueChange={setSleepQuality}
+                              disabled={generateDiet.isPending}
+                            >
+                              <SelectTrigger className="bg-white">
+                                <SelectValue placeholder="Select quality" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Poor">Poor</SelectItem>
+                                <SelectItem value="Average">Average</SelectItem>
+                                <SelectItem value="Good">Good</SelectItem>
+                                <SelectItem value="Excellent">Excellent</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label>Stress Level</Label>
+                            <Select
+                              value={stressLevel}
+                              onValueChange={setStressLevel}
+                              disabled={generateDiet.isPending}
+                            >
+                              <SelectTrigger className="bg-white">
+                                <SelectValue placeholder="Select level" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Low">Low</SelectItem>
+                                <SelectItem value="Moderate">Moderate</SelectItem>
+                                <SelectItem value="High">High</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label>Hydration Level</Label>
+                            <Select
+                              value={hydrationLevel}
+                              onValueChange={setHydrationLevel}
+                              disabled={generateDiet.isPending}
+                            >
+                              <SelectTrigger className="bg-white">
+                                <SelectValue placeholder="Select level" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Low">Low</SelectItem>
+                                <SelectItem value="Moderate">Moderate</SelectItem>
+                                <SelectItem value="High">High</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label>Previous Diet Experience</Label>
+                          <div className="flex flex-wrap gap-2">
+                            {[
+                              'Keto', 'Paleo', 'Vegan', 'Vegetarian',
+                              'Intermittent fasting', 'Low carb', 'Mediterranean', 'DASH'
+                            ].map((diet) => (
+                              <Button
+                                key={diet}
+                                variant={previousDietExperience.includes(diet) ? 'default' : 'outline'}
+                                size="sm"
+                                onClick={() => {
+                                  if (previousDietExperience.includes(diet)) {
+                                    setPreviousDietExperience(previousDietExperience.filter(d => d !== diet));
+                                  } else {
+                                    setPreviousDietExperience([...previousDietExperience, diet]);
+                                  }
+                                }}
+                                disabled={generateDiet.isPending}
+                                className={cn(
+                                  "rounded-full",
+                                  previousDietExperience.includes(diet) ? "bg-emerald-600 hover:bg-emerald-700" : "bg-white"
+                                )}
+                              >
+                                {diet}
+                              </Button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label>Snack Preferences</Label>
+                          <div className="flex flex-wrap gap-2">
+                            {[
+                              'Nuts', 'Fruits', 'Yogurt', 'Protein bars',
+                              'Vegetables', 'Cheese', 'Dark chocolate', 'Smoothies'
+                            ].map((snack) => (
+                              <Button
+                                key={snack}
+                                variant={snackPreferences.includes(snack) ? 'default' : 'outline'}
+                                size="sm"
+                                onClick={() => {
+                                  if (snackPreferences.includes(snack)) {
+                                    setSnackPreferences(snackPreferences.filter(s => s !== snack));
+                                  } else {
+                                    setSnackPreferences([...snackPreferences, snack]);
+                                  }
+                                }}
+                                disabled={generateDiet.isPending}
+                                className={cn(
+                                  "rounded-full",
+                                  snackPreferences.includes(snack) ? "bg-emerald-600 hover:bg-emerald-700" : "bg-white"
+                                )}
+                              >
+                                {snack}
+                              </Button>
+                            ))}
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </div>
+
+                  {/* Additional Notes */}
+                  <div className="mt-6 space-y-2">
+                    <Label>Additional Notes</Label>
+                    <Textarea
+                      value={message}
+                      onChange={(e) => setMessage(e.target.value)}
+                      placeholder="Tell us more about your dietary needs, preferences, or any special requirements..."
+                      className="min-h-[100px] bg-white"
+                      disabled={generateDiet.isPending}
+                    />
+                  </div>
+
+                  <div className="mt-8 flex justify-center">
+                    <Button
+                      size="lg"
+                      onClick={() => generateDiet.mutate()}
+                      disabled={generateDiet.isPending || !age || !gender || !goal}
+                      className="px-8 py-6 text-lg font-semibold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700"
+                    >
+                      {generateDiet.isPending ? (
+                        <div className="flex items-center gap-2">
+                          <Icons.spinner className="h-5 w-5 animate-spin" />
+                          <span>Generating...</span>
+                        </div>
+                      ) : (
+                        'Generate My Diet Plan'
+                      )}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Display the generated plan */}
+              {generateDiet.data && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
+                  className="mt-6"
+                >
+                  <Card className="border-0 shadow-lg overflow-hidden">
+                    <CardHeader className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white">
+                      <CardTitle className="text-2xl">Your Custom Diet Plan</CardTitle>
+                      <CardDescription className="text-emerald-100">
+                        Generated on {dayjs(generateDiet.data.date).format('MMMM D, YYYY')}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="p-6">
+                      <div className="space-y-6">
+                        {generateDiet.data.meals.map((meal, index) => (
+                          <div key={index} className="space-y-2">
+                            <h3 className="text-lg font-semibold text-emerald-800">
+                              {meal.meal_time}
+                            </h3>
+                            <ul className="list-disc pl-5 space-y-1">
+                              {meal.items.map((item, itemIndex) => (
+                                <li key={itemIndex} className="text-gray-700">
+                                  {item}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                        {generateDiet.data.notes && (
+                          <div className="mt-4 p-4 bg-emerald-50 rounded-lg">
+                            <h4 className="font-medium text-emerald-800">Nutritionist's Notes:</h4>
+                            <p className="text-gray-700 mt-1">{generateDiet.data.notes}</p>
+                          </div>
+                        )}
+                      </div>
+                      <div className="mt-6 flex justify-end">
+                        <Button
+                          onClick={() => {
+                            if (generateDiet.data) {
+                              saveDietPlan.mutate({
+                                date: generateDiet.data.date,
+                                meals: generateDiet.data.meals,
+                                notes: generateDiet.data.notes,
+                                prompt: generateDiet.data.prompt,
+                              });
+                            }
+                          }}
+                          disabled={saveDietPlan.isPending || !generateDiet.data}
+                          className="bg-emerald-600 hover:bg-emerald-700"
+                        >
+                          {saveDietPlan.isPending ? (
+                            <Icons.spinner className="h-4 w-4 animate-spin mr-2" />
+                          ) : (
+                            <Icons.save className="h-4 w-4 mr-2" />
+                          )}
+                          Save This Plan
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              )}
+            </motion.div>
+          </TabsContent>
+
+          <TabsContent value="saved">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3 }}
+              className="space-y-6"
+            >
+              {savedPlans && savedPlans.length > 0 ? (
+                savedPlans.map((plan) => (
+                  <Card key={plan._id} className="border-0 shadow-lg overflow-hidden">
+                    <CardHeader className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white">
+                      <CardTitle className="text-xl">
+                        {dayjs(plan.date).format('MMMM D, YYYY')}
+                      </CardTitle>
+                      <CardDescription className="text-emerald-100">
+                        Created on {dayjs(plan.createdAt).format('MMMM D, YYYY')}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="p-6">
+                      <div className="space-y-4">
+                        {plan.meals.map((meal, index) => (
+                          <div key={index} className="space-y-2">
+                            <h3 className="font-semibold text-emerald-800">
+                              {meal.meal_time}
+                            </h3>
+                            <ul className="list-disc pl-5 space-y-1 text-gray-700">
+                              {meal.items.map((item, itemIndex) => (
+                                <li key={itemIndex}>{item}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                        {plan.notes && (
+                          <div className="mt-4 p-4 bg-emerald-50 rounded-lg">
+                            <h4 className="font-medium text-emerald-800">Notes:</h4>
+                            <p className="text-gray-700 mt-1">{plan.notes}</p>
+                          </div>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))
+              ) : (
+                <div className="text-center py-12">
+                  <div className="mx-auto h-24 w-24 rounded-full bg-emerald-50 flex items-center justify-center mb-4">
+                    <Icons.fileText className="h-12 w-12 text-emerald-600" />
+                  </div>
+                  <h3 className="mt-2 text-xl font-semibold text-gray-900">No saved plans yet</h3>
+                  <p className="mt-2 text-gray-600 max-w-md mx-auto">
+                    Generate your first personalized diet plan to see it appear here
+                  </p>
+                  <Button
+                    onClick={() => setTabKey('diet')}
+                    className="mt-6 bg-emerald-600 hover:bg-emerald-700"
+                  >
+                    Create New Plan
+                  </Button>
+                </div>
+              )}
+            </motion.div>
+          </TabsContent>
+        </Tabs>
+      </div>
+
+      {/* Loading Modal */}
+      <AnimatePresence>
+        {showLoadingModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 text-center overflow-hidden"
+            >
+              <div className="relative h-32 w-32 mx-auto mb-6">
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
+                  className="absolute inset-0"
+                >
+                  <Icons.loader className="h-full w-full text-emerald-200" />
+                </motion.div>
+                <div className="absolute inset-4 flex items-center justify-center">
+                  <Icons.nutrition className="h-16 w-16 text-emerald-600 animate-pulse" />
+                </div>
+              </div>
+
+              {/* ✅ Fixed here */}
+              <p>
+                {loadingMessages[currentMessageIndex]}
+              </p>
+
+              <div className="space-y-4 mt-4">
+                <div className="flex justify-between items-center text-sm text-gray-500">
+                  <span>Estimated time remaining:</span>
+                  <span className="font-medium text-emerald-600">
+                    {Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, '0')}
+                  </span>
+                </div>
+
+                <Progress
+                  value={100 - (countdown / 90 * 100)}
+                  className="h-2 bg-gray-200"
+                />
+
+                <div className="flex items-center justify-center gap-2 text-sm text-gray-500">
+                  <Icons.sparkles className="h-4 w-4 text-yellow-500" />
+                  <span>Powered by AI Nutrition Experts</span>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+    </div>
+  );
+}

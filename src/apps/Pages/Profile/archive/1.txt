@@ -1,0 +1,210 @@
+import { useState, useEffect } from 'react';
+import axios from 'axios';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Icons } from '@/components/icons';
+
+interface UserProfile {
+  username: string;
+  email: string;
+  avatar?: string;
+  joinDate?: string;
+}
+
+export function ProfileModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'profile' | 'settings'>('profile');
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const token = localStorage.getItem('token');
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+
+    const fetchProfile = async () => {
+      try {
+        const res = await axios.get(`${import.meta.env.VITE_API_URL}/api/profile`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        setProfile(res.data?.user || null);
+      } catch (err) {
+        console.error('Profile fetch error:', err);
+        setProfile(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchProfile();
+  }, [isOpen]);
+
+  const initial = profile?.username?.charAt(0).toUpperCase() || '';
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+          onClick={onClose}
+        >
+          <motion.div
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 20, opacity: 0 }}
+            transition={{ type: 'spring', damping: 25 }}
+            className="relative w-full max-w-md bg-white dark:bg-gray-900 rounded-2xl shadow-xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Close Button */}
+            <button
+              onClick={onClose}
+              className="absolute top-4 right-4 p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+              aria-label="Close profile"
+            >
+              <Icons.x className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+            </button>
+
+            {loading ? (
+              <div className="flex flex-col items-center justify-center p-8 gap-4 min-h-[300px]">
+                <Icons.spinner className="w-8 h-8 animate-spin text-primary" />
+                <p className="text-gray-500 dark:text-gray-400">Loading profile...</p>
+              </div>
+            ) : !profile ? (
+              <div className="flex flex-col items-center justify-center p-8 gap-4 min-h-[300px]">
+                <Icons.userX className="w-10 h-10 text-gray-400" />
+                <h3 className="text-xl font-semibold text-gray-800 dark:text-white">Profile not found</h3>
+                <p className="text-gray-500 dark:text-gray-400 text-center">
+                  We couldn't load your profile information. Please try again later.
+                </p>
+                <button
+                  onClick={onClose}
+                  className="mt-4 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* Header with Avatar */}
+                <div className="relative pt-10 pb-6 px-6 bg-gradient-to-br from-purple-600 to-indigo-600 text-center">
+                  <div className="absolute -top-10 left-1/2 transform -translate-x-1/2">
+                    <div className="h-20 w-20 rounded-full border-4 border-white dark:border-gray-900 bg-gradient-to-r from-amber-400 to-orange-500 text-white flex items-center justify-center text-3xl font-bold shadow-lg">
+                      {profile.avatar ? (
+                        <img
+                          src={profile.avatar}
+                          alt={profile.username}
+                          className="w-full h-full rounded-full object-cover"
+                        />
+                      ) : (
+                        initial
+                      )}
+                    </div>
+                  </div>
+                  <h1 className="mt-8 text-2xl font-bold text-white">{profile.username}</h1>
+                  <p className="text-purple-200">{profile.email}</p>
+                  {profile.joinDate && (
+                    <p className="mt-2 text-sm text-purple-100">
+                      Member since {new Date(profile.joinDate).toLocaleDateString()}
+                    </p>
+                  )}
+                </div>
+
+                {/* Tabs */}
+                <div className="flex border-b dark:border-gray-800">
+                  <button
+                    onClick={() => setActiveTab('profile')}
+                    className={`flex-1 py-3 font-medium text-sm transition-colors ${
+                      activeTab === 'profile'
+                        ? 'text-primary border-b-2 border-primary'
+                        : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                    }`}
+                  >
+                    Profile
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('settings')}
+                    className={`flex-1 py-3 font-medium text-sm transition-colors ${
+                      activeTab === 'settings'
+                        ? 'text-primary border-b-2 border-primary'
+                        : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                    }`}
+                  >
+                    Settings
+                  </button>
+                </div>
+
+                {/* Tab Content */}
+                <div className="p-6">
+                  {activeTab === 'profile' ? (
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                        <Icons.user className="w-5 h-5 text-gray-500" />
+                        <div>
+                          <p className="text-sm text-gray-500">Username</p>
+                          <p className="font-medium">{profile.username}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                        <Icons.mail  />
+                        <div>
+                          <p className="text-sm text-gray-500">Email</p>
+                          <p className="font-medium">{profile.email}</p>
+                        </div>
+                      </div>
+                      {profile.joinDate && (
+                        <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                          <Icons.calendar className="w-5 h-5 text-gray-500" />
+                          <div>
+                            <p className="text-sm text-gray-500">Member since</p>
+                            <p className="font-medium">
+                              {new Date(profile.joinDate).toLocaleDateString()}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <h3 className="font-medium text-gray-700 dark:text-gray-300">Account Settings</h3>
+                      <button className="w-full flex items-center justify-between p-3 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg transition-colors">
+                        <span>Change Password</span>
+                        <Icons.chevronRight className="w-5 h-5 text-gray-400" />
+                      </button>
+                      <button className="w-full flex items-center justify-between p-3 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg transition-colors">
+                        <span>Notification Preferences</span>
+                        <Icons.chevronRight className="w-5 h-5 text-gray-400" />
+                      </button>
+                      <button className="w-full flex items-center justify-between p-3 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg transition-colors">
+                        <span>Privacy Settings</span>
+                        <Icons.chevronRight className="w-5 h-5 text-gray-400" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer Actions */}
+                <div className="p-4 border-t dark:border-gray-800 flex justify-end gap-2">
+                  <button
+                    onClick={onClose}
+                    className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+                  >
+                    Close
+                  </button>
+                  <button className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">
+                    Edit Profile
+                  </button>
+                </div>
+              </>
+            )}
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}

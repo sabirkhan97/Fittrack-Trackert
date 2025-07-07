@@ -1,0 +1,375 @@
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import api from '@/api/api';
+import {
+  Layout,
+  Menu,
+  Card,
+  Input,
+  Button,
+  Typography,
+  Select,
+  Row,
+  Col,
+  InputNumber,
+  Tabs,
+} from 'antd';
+import {
+  PlusOutlined,
+  LogoutOutlined,
+} from '@ant-design/icons';
+import { toast } from 'sonner';
+import dayjs from 'dayjs';
+
+const { Header, Sider, Content } = Layout;
+const { Title, Text } = Typography;
+const { TextArea } = Input;
+const { Option } = Select;
+
+export default function WorkoutDietGenerator() {
+  const [collapsed, setCollapsed] = useState(false);
+  const [tabKey, setTabKey] = useState('workout');
+
+  // Common fields for workout
+  const [message, setMessage] = useState('');
+  const [muscleGroup, setMuscleGroup] = useState<string | undefined>();
+  const [difficulty, setDifficulty] = useState<string | undefined>();
+  const [duration, setDuration] = useState<number | null>(null);
+  const [note, setNote] = useState('');
+
+  const [age, setAge] = useState<number | null>(null);
+  const [gender, setGender] = useState<string | undefined>();
+  const [height, setHeight] = useState<number | null>(null);
+  const [weight, setWeight] = useState<number | null>(null);
+  const [goal, setGoal] = useState<string | undefined>();
+  const [experience, setExperience] = useState<string | undefined>();
+
+  // Diet tab fields
+  const [dietMessage, setDietMessage] = useState('');
+  const [dietNote, setDietNote] = useState('');
+
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  // Workout Mutation
+  const generateWorkout = useMutation({
+    mutationFn: async () => {
+      const prompt = `
+        ${message}
+        ${muscleGroup ? ` Target muscle group: ${muscleGroup}.` : ''}
+        ${difficulty ? ` Difficulty: ${difficulty}.` : ''}
+        ${duration ? ` Duration: ${duration} min.` : ''}
+        ${age ? ` Age: ${age}.` : ''}
+        ${gender ? ` Gender: ${gender}.` : ''}
+        ${height ? ` Height: ${height} cm.` : ''}
+        ${weight ? ` Weight: ${weight} kg.` : ''}
+        ${goal ? ` Goal: ${goal}.` : ''}
+        ${experience ? ` Experience: ${experience}.` : ''}
+        ${note ? ` Note: ${note}.` : ''}
+      `;
+
+      const res = await api.post(
+        '/api/workout-plans',
+        { prompt, duration },
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      return res.data.workoutPlan;
+    },
+    onSuccess: (data) => {
+      toast.success('Workout plan generated!');
+      queryClient.setQueryData(['workoutPlan'], data);
+    },
+    onError: () => {
+      toast.error('Failed to generate workout plan.');
+    },
+  });
+
+  // Diet Mutation
+  const generateDiet = useMutation({
+    mutationFn: async () => {
+      const prompt = `
+        ${dietMessage}
+        ${age ? ` Age: ${age}.` : ''}
+        ${gender ? ` Gender: ${gender}.` : ''}
+        ${height ? ` Height: ${height} cm.` : ''}
+        ${weight ? ` Weight: ${weight} kg.` : ''}
+        ${goal ? ` Goal: ${goal}.` : ''}
+        ${dietNote ? ` Note: ${dietNote}.` : ''}
+      `;
+
+      const res = await api.post(
+        '/api/diet-plans',
+        { prompt },
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      return res.data.dietPlan;
+    },
+    onSuccess: (data) => {
+      toast.success('Diet plan generated!');
+      queryClient.setQueryData(['dietPlan'], data);
+    },
+    onError: () => {
+      toast.error('Failed to generate diet plan.');
+    },
+  });
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    queryClient.clear();
+    toast.success('Logged out');
+    navigate('/login');
+  };
+
+  return (
+    <Layout style={{ minHeight: '100vh' }}>
+      <Sider
+        collapsible
+        collapsed={collapsed}
+        onCollapse={setCollapsed}
+        style={{ background: '#001529' }}
+      >
+        <div
+          style={{
+            height: 64,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#fff',
+            fontSize: 20,
+            fontWeight: 'bold',
+          }}
+        >
+          {collapsed ? 'FT' : 'FitTrack'}
+        </div>
+        <Menu theme="dark" mode="inline" selectedKeys={[tabKey]}>
+          <Menu.Item
+            key="workout"
+            icon={<PlusOutlined />}
+            onClick={() => setTabKey('workout')}
+          >
+            Workout Generator
+          </Menu.Item>
+          <Menu.Item
+            key="diet"
+            icon={<PlusOutlined />}
+            onClick={() => setTabKey('diet')}
+          >
+            Diet Generator
+          </Menu.Item>
+          <Menu.Item
+            key="logout"
+            icon={<LogoutOutlined />}
+            onClick={handleLogout}
+          >
+            Sign Out
+          </Menu.Item>
+        </Menu>
+      </Sider>
+
+      <Layout>
+        <Header
+          style={{
+            background: '#fff',
+            padding: '0 24px',
+          }}
+        >
+          <Title level={4} style={{ margin: 0 }}>
+            {tabKey === 'workout' ? 'Workout Generator' : 'Diet Generator'}
+          </Title>
+        </Header>
+
+        <Content style={{ padding: 24, background: '#f0f2f5' }}>
+          <Tabs activeKey={tabKey} onChange={setTabKey}>
+            <Tabs.TabPane tab="Workout Generator" key="workout">
+              <Card>
+                <Row gutter={16}>
+                  <Col md={6}>
+                    <InputNumber
+                      min={10}
+                      max={100}
+                      value={age}
+                      onChange={setAge}
+                      placeholder="Age"
+                      style={{ width: '100%' }}
+                    />
+                  </Col>
+                  <Col md={6}>
+                    <Select
+                      value={gender}
+                      onChange={setGender}
+                      placeholder="Gender"
+                      style={{ width: '100%' }}
+                    >
+                      <Option value="Male">Male</Option>
+                      <Option value="Female">Female</Option>
+                    </Select>
+                  </Col>
+                  <Col md={6}>
+                    <InputNumber
+                      min={50}
+                      max={250}
+                      value={height}
+                      onChange={setHeight}
+                      placeholder="Height (cm)"
+                      style={{ width: '100%' }}
+                    />
+                  </Col>
+                  <Col md={6}>
+                    <InputNumber
+                      min={20}
+                      max={250}
+                      value={weight}
+                      onChange={setWeight}
+                      placeholder="Weight (kg)"
+                      style={{ width: '100%' }}
+                    />
+                  </Col>
+                </Row>
+
+                <Row gutter={16} style={{ marginTop: 16 }}>
+                  <Col md={6}>
+                    <Input
+                      value={goal}
+                      onChange={(e) => setGoal(e.target.value)}
+                      placeholder="Goal"
+                    />
+                  </Col>
+                  <Col md={6}>
+                    <Select
+                      value={experience}
+                      onChange={setExperience}
+                      placeholder="Experience"
+                      style={{ width: '100%' }}
+                    >
+                      <Option value="Beginner">Beginner</Option>
+                      <Option value="Intermediate">Intermediate</Option>
+                      <Option value="Advanced">Advanced</Option>
+                    </Select>
+                  </Col>
+                </Row>
+
+                <Row gutter={16} style={{ marginTop: 16 }}>
+                  <Col md={8}>
+                    <Select
+                      value={muscleGroup}
+                      onChange={setMuscleGroup}
+                      placeholder="Muscle Group"
+                      style={{ width: '100%' }}
+                    >
+                      <Option value="Chest">Chest</Option>
+                      <Option value="Back">Back</Option>
+                      <Option value="Legs">Legs</Option>
+                      <Option value="Arms">Arms</Option>
+                    </Select>
+                  </Col>
+                  <Col md={8}>
+                    <Select
+                      value={difficulty}
+                      onChange={setDifficulty}
+                      placeholder="Difficulty"
+                      style={{ width: '100%' }}
+                    >
+                      <Option value="Beginner">Beginner</Option>
+                      <Option value="Intermediate">Intermediate</Option>
+                      <Option value="Advanced">Advanced</Option>
+                    </Select>
+                  </Col>
+                  <Col md={8}>
+                    <InputNumber
+                      min={0}
+                      placeholder="Duration (min)"
+                      value={duration}
+                      onChange={setDuration}
+                      style={{ width: '100%' }}
+                    />
+                  </Col>
+                </Row>
+
+                <TextArea
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  placeholder="Describe your workout..."
+                  rows={4}
+                  style={{ marginTop: 16 }}
+                />
+                <TextArea
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="Additional note..."
+                  rows={2}
+                  style={{ marginTop: 8 }}
+                />
+
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={() => generateWorkout.mutate()}
+                  loading={generateWorkout.isPending}
+                  style={{ marginTop: 16 }}
+                >
+                  Generate Workout
+                </Button>
+
+                {generateWorkout.data && (
+                  <Card
+                    title="Workout Plan"
+                    style={{ marginTop: 24, background: '#e6f7ff' }}
+                  >
+                    <Text>
+                      Date: {dayjs(generateWorkout.data.date).format('DD MMM YYYY')}
+                    </Text>
+                    <ul style={{ marginTop: 12, paddingLeft: 20 }}>
+                      {generateWorkout.data.exercises.map((ex: any, idx: number) => (
+                        <li key={idx}>
+                          {ex.exercise_name} — {ex.sets} sets × {ex.reps} reps{' '}
+                          {ex.weight ? `@ ${ex.weight} kg` : ''}
+                        </li>
+                      ))}
+                    </ul>
+                  </Card>
+                )}
+              </Card>
+            </Tabs.TabPane>
+
+            <Tabs.TabPane tab="Diet Generator" key="diet">
+              <Card>
+                <TextArea
+                  value={dietMessage}
+                  onChange={(e) => setDietMessage(e.target.value)}
+                  placeholder="Describe your diet preferences..."
+                  rows={4}
+                />
+                <TextArea
+                  value={dietNote}
+                  onChange={(e) => setDietNote(e.target.value)}
+                  placeholder="Additional note..."
+                  rows={2}
+                  style={{ marginTop: 8 }}
+                />
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={() => generateDiet.mutate()}
+                  loading={generateDiet.isPending}
+                  style={{ marginTop: 16 }}
+                >
+                  Generate Diet
+                </Button>
+
+                {generateDiet.data && (
+                  <Card
+                    title="Diet Plan"
+                    style={{ marginTop: 24, background: '#e6f7ff' }}
+                  >
+                    <pre>{JSON.stringify(generateDiet.data, null, 2)}</pre>
+                  </Card>
+                )}
+              </Card>
+            </Tabs.TabPane>
+          </Tabs>
+        </Content>
+      </Layout>
+    </Layout>
+  );
+}

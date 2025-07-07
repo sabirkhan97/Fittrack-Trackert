@@ -1,0 +1,22 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle with gradient -->
+  <circle cx="64" cy="64" r="60" fill="url(#gradient)"/>
+  
+  <!-- Dumbbell icon with pulse effect -->
+  <path d="M44 64H28C26.8954 64 26 63.1046 26 62V50C26 48.8954 26.8954 48 28 48H44" stroke="white" stroke-width="8" stroke-linecap="round"/>
+  <path d="M84 64H100C101.105 64 102 63.1046 102 62V50C102 48.8954 101.105 48 100 48H84" stroke="white" stroke-width="8" stroke-linecap="round"/>
+  <rect x="38" y="44" width="52" height="24" rx="4" fill="white"/>
+  
+  <!-- Pulse lines -->
+  <path d="M64 72V92" stroke="white" stroke-width="4" stroke-linecap="round" stroke-dasharray="4 4"/>
+  <path d="M54 72V84" stroke="white" stroke-width="2" stroke-linecap="round" stroke-dasharray="2 2"/>
+  <path d="M74 72V88" stroke="white" stroke-width="3" stroke-linecap="round" stroke-dasharray="3 3"/>
+  
+  <!-- Gradient definition -->
+  <defs>
+    <linearGradient id="gradient" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4F46E5"/>
+      <stop offset="1" stop-color="#9333EA"/>
+    </linearGradient>
+  </defs>
+</svg>

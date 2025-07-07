@@ -1,0 +1,131 @@
+import { Icons } from "@/components/icons";
+import { useNavigate } from "react-router-dom";
+
+export function Footer() {
+  const currentYear = new Date().getFullYear();
+  const navigate = useNavigate();
+
+  return (
+    <footer className="bg-background border-t">
+      <div className="container px-6 py-12 mx-auto">
+        <div className="grid grid-cols-1 gap-8 md:grid-cols-4 lg:grid-cols-5">
+          {/* Brand Column */}
+          <div className="md:col-span-2 lg:col-span-1">
+            <div className="flex items-center space-x-2">
+              <Icons.dumbbell />
+              <span className="text-xl font-bold tracking-tighter bg-gradient-to-r from-primary to-purple-600 bg-clip-text text-transparent">
+                FitTrack
+              </span>
+            </div>
+            
+            <p className="max-w-xs mt-4 text-sm text-muted-foreground">
+              Your personal fitness companion. Track workouts, monitor progress, and achieve your goals.
+            </p>
+            
+            <div className="flex mt-6 space-x-4">
+              {[Icons.twitter, Icons.instagram, Icons.facebook, Icons.linkedin].map((Icon, index) => (
+                <a 
+                  key={index}
+                  href="#" 
+                  className="text-muted-foreground transition-colors duration-300 hover:text-primary"
+                  aria-label="Social media"
+                >
+                  <Icon className="w-5 h-5" />
+                </a>
+              ))}
+            </div>
+          </div>
+
+          {/* Quick Links */}
+          <div>
+            <h3 className="text-sm font-semibold tracking-wider uppercase">
+              Quick Links
+            </h3>
+            <nav className="mt-4 space-y-2">
+              {['gym-notes', 'progress', 'exercises', 'nutrition'].map((page) => (
+                <button
+                  key={page}
+                  onClick={() => navigate(`/${page}`)}
+                  className="block text-sm text-muted-foreground capitalize transition-colors duration-300 hover:text-primary"
+                >
+                  {page.replace('-', ' ')}
+                </button>
+              ))}
+            </nav>
+          </div>
+
+          {/* Resources */}
+          <div>
+            <h3 className="text-sm font-semibold tracking-wider uppercase">
+              Resources
+            </h3>
+            <nav className="mt-4 space-y-2">
+              {['Blog', 'Guides', 'Community', 'Support'].map((resource) => (
+                <a
+                  key={resource}
+                  href="#"
+                  className="block text-sm text-muted-foreground transition-colors duration-300 hover:text-primary"
+                >
+                  {resource}
+                </a>
+              ))}
+            </nav>
+          </div>
+
+          {/* Contact */}
+          <div>
+            <h3 className="text-sm font-semibold tracking-wider uppercase">
+              Contact
+            </h3>
+            <address className="mt-4 space-y-3 not-italic">
+              <div className="flex items-start space-x-3">
+                <Icons.mail />
+                <a
+                  href="mailto:hello@fittrack.com"
+                  className="text-sm text-muted-foreground transition-colors duration-300 hover:text-primary"
+                >
+                  hello@fittrack.com
+                </a>
+              </div>
+              <div className="flex items-start space-x-3">
+                <Icons.phone  />
+                <a
+                  href="tel:+1234567890"
+                  className="text-sm text-muted-foreground transition-colors duration-300 hover:text-primary"
+                >
+                  +1 (234) 567-890
+                </a>
+              </div>
+              <div className="flex items-start space-x-3">
+                <Icons.mapPin />
+                <span className="text-sm text-muted-foreground">
+                  123 Fitness St, Health City
+                </span>
+              </div>
+            </address>
+          </div>
+        </div>
+
+        <div className="pt-8 mt-12 border-t border-border">
+          <div className="flex flex-col items-center justify-between md:flex-row">
+            <p className="text-sm text-center text-muted-foreground md:text-left">
+              © {currentYear} FitTrack. All rights reserved.
+            </p>
+            
+            <div className="flex flex-wrap items-center justify-center gap-4 mt-4 md:mt-0">
+              <a href="#" className="text-sm text-muted-foreground transition-colors duration-300 hover:text-primary">
+                Privacy Policy
+              </a>
+              <a href="#" className="text-sm text-muted-foreground transition-colors duration-300 hover:text-primary">
+                Terms of Service
+              </a>
+              <a href="#" className="text-sm text-muted-foreground transition-colors duration-300 hover:text-primary">
+                Cookies
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </footer>
+  );
+}

@@ -1,0 +1,1709 @@
+"use client"
+
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+import { motion, AnimatePresence } from 'framer-motion';
+import { toast } from 'sonner';
+import { Icons } from '@/components/icons';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Progress } from '@/components/ui/progress';
+import { Badge } from '@/components/ui/badge';
+import { format } from 'date-fns';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import { Slider } from '@/components/ui/slider';
+
+interface Exercise {
+  exercise_name: string;
+  sets: number;
+  reps: number;
+  weight: number;
+  rest: string;
+  rpe?: number;
+  tempo?: string;
+  superset?: string;
+  notes?: string;
+}
+
+interface WorkoutPlan {
+  id: string;
+  date: string;
+  title: string;
+  exercises: Exercise[];
+  notes?: string;
+  prompt?: string;
+  duration?: number;
+  weeklySchedule?: {
+    day1?: string;
+    day2?: string;
+    day3?: string;
+    day4?: string;
+    day5?: string;
+    day6?: string;
+    day7?: string;
+  };
+  bodyMetrics?: {
+    age?: number;
+    sex?: string;
+    height?: string;
+    weight?: string;
+    bodyFat?: string;
+    muscleMass?: string;
+    waistCircumference?: string;
+    hipCircumference?: string;
+    restingHeartRate?: string;
+    bloodPressure?: string;
+  };
+  fitnessProfile?: {
+    experienceLevel?: string;
+    primaryGoal?: string;
+    secondaryGoals?: string[];
+    targetAreas?: string[];
+    avoidAreas?: string[];
+    injuries?: string[];
+    medicalConditions?: string[];
+    currentFitnessLevel?: string;
+    workoutHistory?: string;
+    recentPerformance?: string;
+  };
+  equipment?: {
+    available?: string[];
+    homeGym?: boolean;
+    resistanceBands?: boolean;
+    dumbbells?: boolean;
+    barbell?: boolean;
+    kettlebells?: boolean;
+    pullUpBar?: boolean;
+    cardioMachine?: boolean;
+    weightMachine?: boolean;
+    cableMachine?: boolean;
+    yogaMat?: boolean;
+    stabilityBall?: boolean;
+    foamRoller?: boolean;
+    trx?: boolean;
+    medicineBall?: boolean;
+  };
+  preferences?: {
+    workoutTime?: string;
+    daysPerWeek?: number;
+    intensity?: string;
+    favoriteExercises?: string[];
+    dislikedExercises?: string[];
+    preferredTrainingStyle?: string[];
+    workoutEnvironment?: string;
+    musicPreference?: string;
+    trainingPartner?: boolean;
+    progressTrackingMethod?: string;
+  };
+  nutritionPreferences?: {
+    dietaryRestrictions?: string[];
+    supplements?: string[];
+    mealTiming?: string;
+    hydrationLevel?: string;
+  };
+  recoveryPreferences?: {
+    sleepQuality?: string;
+    sleepDuration?: string;
+    stressLevel?: string;
+    recoveryActivities?: string[];
+    stretchingRoutine?: string;
+  };
+}
+
+const WorkoutGenerator = () => {
+  const [prompt, setPrompt] = useState('');
+  const [workoutPlan, setWorkoutPlan] = useState<WorkoutPlan | null>(null);
+  const [savedPlans, setSavedPlans] = useState<WorkoutPlan[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [activeTab, setActiveTab] = useState('generate');
+  const [countdown, setCountdown] = useState(180);
+  const [showModal, setShowModal] = useState(false);
+  const [formData, setFormData] = useState({
+    // Basic Info
+    planTitle: '',
+    
+    // Body Metrics
+    age: '',
+    sex: '',
+    height: '',
+    weight: '',
+    bodyFat: '',
+    muscleMass: '',
+    waistCircumference: '',
+    hipCircumference: '',
+    restingHeartRate: '',
+    bloodPressure: '',
+    
+    // Fitness Profile
+    experienceLevel: '',
+    primaryGoal: '',
+    secondaryGoals: [] as string[],
+    targetAreas: [] as string[],
+    avoidAreas: [] as string[],
+    injuries: [] as string[],
+    medicalConditions: [] as string[],
+    currentFitnessLevel: '',
+    workoutHistory: '',
+    recentPerformance: '',
+    
+    // Equipment
+    availableEquipment: [] as string[],
+    homeGym: false,
+    resistanceBands: false,
+    dumbbells: false,
+    barbell: false,
+    kettlebells: false,
+    pullUpBar: false,
+    cardioMachine: false,
+    weightMachine: false,
+    cableMachine: false,
+    yogaMat: false,
+    stabilityBall: false,
+    foamRoller: false,
+    trx: false,
+    medicineBall: false,
+    
+    // Preferences
+    workoutTime: '',
+    daysPerWeek: '',
+    intensity: '',
+    favoriteExercises: '',
+    dislikedExercises: '',
+    preferredTrainingStyle: [] as string[],
+    workoutEnvironment: '',
+    musicPreference: '',
+    trainingPartner: false,
+    progressTrackingMethod: '',
+    
+    // Nutrition
+    dietaryRestrictions: [] as string[],
+    supplements: [] as string[],
+    mealTiming: '',
+    hydrationLevel: '',
+    
+    // Recovery
+    sleepQuality: '',
+    sleepDuration: '',
+    stressLevel: '',
+    recoveryActivities: [] as string[],
+    stretchingRoutine: '',
+    
+    // Weekly Schedule Preferences
+    day1: '',
+    day2: '',
+    day3: '',
+    day4: '',
+    day5: '',
+    day6: '',
+    day7: '',
+  });
+
+  const token = localStorage.getItem('token');
+
+  const fetchSavedPlans = async () => {
+    try {
+      const res = await axios.get('/api/workout-plans/my', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setSavedPlans(res.data.plans);
+    } catch (error: any) {
+      console.error('Fetch Saved Plans Error:', error);
+      toast.error(error.response?.data?.error || 'Failed to load saved plans');
+    }
+  };
+
+  useEffect(() => {
+    if (token) {
+      fetchSavedPlans();
+    }
+  }, [token]);
+
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (showModal && countdown > 0) {
+      timer = setInterval(() => {
+        setCountdown((prev) => prev - 1);
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [showModal, countdown]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    setFormData({
+      ...formData,
+      [name]: value
+    });
+  };
+
+  const handleSelectChange = (name: string, value: string) => {
+    setFormData({
+      ...formData,
+      [name]: value
+    });
+  };
+
+  const handleMultiSelectChange = (name: string, value: string) => {
+    const currentValues = formData[name as keyof typeof formData] as string[];
+    if (currentValues.includes(value)) {
+      setFormData({
+        ...formData,
+        [name]: currentValues.filter(item => item !== value)
+      });
+    } else {
+      setFormData({
+        ...formData,
+        [name]: [...currentValues, value]
+      });
+    }
+  };
+
+  const handleToggleChange = (name: string, checked: boolean) => {
+    setFormData({
+      ...formData,
+      [name]: checked
+    });
+  };
+
+  const handleSliderChange = (name: string, value: number[]) => {
+    setFormData({
+      ...formData,
+      [name]: value[0]
+    });
+  };
+
+  const generatePrompt = () => {
+    return `Create a comprehensive ${formData.daysPerWeek}-day workout plan titled "${formData.planTitle}" for a ${formData.age}-year-old ${formData.sex} with the following characteristics:
+
+**Body Metrics:**
+- Height: ${formData.height} cm
+- Weight: ${formData.weight} kg
+- Body Fat: ${formData.bodyFat}%
+- Muscle Mass: ${formData.muscleMass} kg
+- Waist: ${formData.waistCircumference} cm
+- Hip: ${formData.hipCircumference} cm
+- Resting HR: ${formData.restingHeartRate} bpm
+- BP: ${formData.bloodPressure}
+
+**Fitness Profile:**
+- Experience: ${formData.experienceLevel}
+- Primary Goal: ${formData.primaryGoal}
+- Secondary Goals: ${formData.secondaryGoals.join(', ')}
+- Target Areas: ${formData.targetAreas.join(', ')}
+- Avoid Areas: ${formData.avoidAreas.join(', ')}
+- Injuries: ${formData.injuries.join(', ')}
+- Conditions: ${formData.medicalConditions.join(', ')}
+- Current Level: ${formData.currentFitnessLevel}
+- Recent Performance: ${formData.recentPerformance}
+
+**Equipment Available:**
+${formData.homeGym ? '- Home Gym\n' : ''}
+${formData.resistanceBands ? '- Resistance Bands\n' : ''}
+${formData.dumbbells ? '- Dumbbells\n' : ''}
+${formData.barbell ? '- Barbell\n' : ''}
+${formData.kettlebells ? '- Kettlebells\n' : ''}
+${formData.pullUpBar ? '- Pull-up Bar\n' : ''}
+${formData.cardioMachine ? '- Cardio Machine\n' : ''}
+${formData.weightMachine ? '- Weight Machine\n' : ''}
+${formData.cableMachine ? '- Cable Machine\n' : ''}
+
+**Preferences:**
+- Workout Time: ${formData.workoutTime}
+- Days/Week: ${formData.daysPerWeek}
+- Intensity: ${formData.intensity}
+- Favorite Exercises: ${formData.favoriteExercises}
+- Disliked Exercises: ${formData.dislikedExercises}
+- Training Style: ${formData.preferredTrainingStyle.join(', ')}
+- Environment: ${formData.workoutEnvironment}
+- Music: ${formData.musicPreference}
+- Tracking: ${formData.progressTrackingMethod}
+
+**Nutrition:**
+- Dietary Restrictions: ${formData.dietaryRestrictions.join(', ')}
+- Supplements: ${formData.supplements.join(', ')}
+- Meal Timing: ${formData.mealTiming}
+- Hydration: ${formData.hydrationLevel}
+
+**Recovery:**
+- Sleep Quality: ${formData.sleepQuality}
+- Sleep Duration: ${formData.sleepDuration} hours
+- Stress Level: ${formData.stressLevel}
+- Recovery Activities: ${formData.recoveryActivities.join(', ')}
+- Stretching: ${formData.stretchingRoutine}
+
+**Weekly Schedule Preferences:**
+- Monday: ${formData.day1}
+- Tuesday: ${formData.day2}
+- Wednesday: ${formData.day3}
+- Thursday: ${formData.day4}
+- Friday: ${formData.day5}
+- Saturday: ${formData.day6}
+- Sunday: ${formData.day7}
+
+**Additional Notes:**
+${prompt}
+
+Please provide:
+1. A detailed weekly workout schedule
+2. Specific exercises with sets, reps, weight, rest periods, RPE, and tempo
+3. Superset recommendations where appropriate
+4. Progressive overload plan
+5. Warm-up and cool-down routines
+6. Recovery recommendations
+7. Nutrition guidance aligned with goals
+8. Tracking methodology suggestions`;
+  };
+
+  const handleGenerate = async () => {
+    if (!formData.primaryGoal) {
+      toast.warning('Please select at least a primary goal');
+      return;
+    }
+
+    if (!token) {
+      toast.error('Please log in to generate a workout plan');
+      return;
+    }
+
+    setLoading(true);
+    setShowModal(true);
+    setCountdown(180);
+
+    try {
+      const fullPrompt = generatePrompt();
+      const res = await axios.post(
+        '/api/workout-plans',
+        {
+          prompt: fullPrompt,
+          bodyMetrics: {
+            age: formData.age,
+            sex: formData.sex,
+            height: formData.height,
+            weight: formData.weight,
+            bodyFat: formData.bodyFat,
+            muscleMass: formData.muscleMass,
+            waistCircumference: formData.waistCircumference,
+            hipCircumference: formData.hipCircumference,
+            restingHeartRate: formData.restingHeartRate,
+            bloodPressure: formData.bloodPressure,
+          },
+          fitnessProfile: {
+            experienceLevel: formData.experienceLevel,
+            primaryGoal: formData.primaryGoal,
+            secondaryGoals: formData.secondaryGoals,
+            targetAreas: formData.targetAreas,
+            avoidAreas: formData.avoidAreas,
+            injuries: formData.injuries,
+            medicalConditions: formData.medicalConditions,
+            currentFitnessLevel: formData.currentFitnessLevel,
+            workoutHistory: formData.workoutHistory,
+            recentPerformance: formData.recentPerformance,
+          },
+          equipment: {
+            available: formData.availableEquipment,
+            homeGym: formData.homeGym,
+            resistanceBands: formData.resistanceBands,
+            dumbbells: formData.dumbbells,
+            barbell: formData.barbell,
+            kettlebells: formData.kettlebells,
+            pullUpBar: formData.pullUpBar,
+            cardioMachine: formData.cardioMachine,
+            weightMachine: formData.weightMachine,
+            cableMachine: formData.cableMachine,
+            yogaMat: formData.yogaMat,
+            stabilityBall: formData.stabilityBall,
+            foamRoller: formData.foamRoller,
+            trx: formData.trx,
+            medicineBall: formData.medicineBall,
+          },
+          preferences: {
+            workoutTime: formData.workoutTime,
+            daysPerWeek: formData.daysPerWeek ? parseInt(formData.daysPerWeek) : undefined,
+            intensity: formData.intensity,
+            favoriteExercises: formData.favoriteExercises.split(',').map(e => e.trim()),
+            dislikedExercises: formData.dislikedExercises.split(',').map(e => e.trim()),
+            preferredTrainingStyle: formData.preferredTrainingStyle,
+            workoutEnvironment: formData.workoutEnvironment,
+            musicPreference: formData.musicPreference,
+            trainingPartner: formData.trainingPartner,
+            progressTrackingMethod: formData.progressTrackingMethod,
+          },
+          nutritionPreferences: {
+            dietaryRestrictions: formData.dietaryRestrictions,
+            supplements: formData.supplements,
+            mealTiming: formData.mealTiming,
+            hydrationLevel: formData.hydrationLevel,
+          },
+          recoveryPreferences: {
+            sleepQuality: formData.sleepQuality,
+            sleepDuration: formData.sleepDuration,
+            stressLevel: formData.stressLevel,
+            recoveryActivities: formData.recoveryActivities,
+            stretchingRoutine: formData.stretchingRoutine,
+          },
+          weeklySchedule: {
+            day1: formData.day1,
+            day2: formData.day2,
+            day3: formData.day3,
+            day4: formData.day4,
+            day5: formData.day5,
+            day6: formData.day6,
+            day7: formData.day7,
+          }
+        },
+        {
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 180000
+        }
+      );
+      
+      if (!res.data?.workoutPlan) {
+        throw new Error('Invalid response structure from server');
+      }
+
+      setWorkoutPlan(res.data.workoutPlan);
+      toast.success('Workout plan generated successfully');
+    } catch (error: any) {
+      console.error('Generate Error:', error);
+      
+      if (error.response) {
+        toast.error(error.response.data?.error || 
+                   error.response.data?.message || 
+                   'Failed to generate workout plan');
+      } else if (error.request) {
+        toast.error('No response from server. Please try again.');
+      } else {
+        toast.error('Error setting up request: ' + error.message);
+      }
+    } finally {
+      setLoading(false);
+      setShowModal(false);
+    }
+  };
+
+  const handleSave = async () => {
+    if (saving || !workoutPlan) return;
+
+    setSaving(true);
+    try {
+      await axios.post(
+        '/api/workout-plans/save',
+        {
+          ...workoutPlan,
+          title: formData.planTitle || `Workout Plan ${format(new Date(), 'MMM d, yyyy')}`,
+          prompt: generatePrompt(),
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      toast.success('Workout plan saved successfully');
+      await fetchSavedPlans();
+      setActiveTab('saved');
+    } catch (error: any) {
+      console.error('Save Error:', error);
+      toast.error(error.response?.data?.error || 'Failed to save workout plan');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (planId: string) => {
+    try {
+      await axios.delete(`/api/workout-plans/${planId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      
+      toast.success('Workout plan deleted');
+      await fetchSavedPlans();
+    } catch (error: any) {
+      console.error('Delete Error:', error);
+      toast.error(error.response?.data?.error || 'Failed to delete plan');
+    }
+  };
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  };
+
+  // Options for various select inputs
+  const goalOptions = [
+    "Muscle Gain", "Fat Loss", "Strength", "Endurance", "Mobility", 
+    "Rehabilitation", "Sports Performance", "General Fitness", "Body Recomposition",
+    "Power", "Speed", "Agility", "Flexibility", "Posture Correction"
+  ];
+
+  const targetAreaOptions = [
+    "Chest", "Back", "Shoulders", "Arms", "Legs", "Core", "Glutes", 
+    "Full Body", "Hamstrings", "Quads", "Calves", "Forearms", "Neck"
+  ];
+
+  const experienceLevels = [
+    "Beginner", "Intermediate", "Advanced", "Athlete", "Recreational"
+  ];
+
+  const intensityLevels = [
+    "Low", "Moderate", "High", "Extreme", "Varied"
+  ];
+
+  const workoutTimes = [
+    "Morning", "Afternoon", "Evening", "Any", "Lunch Break"
+  ];
+
+  const trainingStyles = [
+    "Bodybuilding", "Powerlifting", "CrossFit", "Calisthenics", "Functional",
+    "Circuit Training", "HIIT", "Pilates", "Yoga", "Strongman", "Olympic Weightlifting"
+  ];
+
+  const workoutEnvironments = [
+    "Gym", "Home", "Outdoor", "Pool", "Studio", "Any"
+  ];
+
+  const musicPreferences = [
+    "Upbeat", "Rock", "Hip-Hop", "Electronic", "Classical", 
+    "Podcasts", "None", "Varied"
+  ];
+
+  const trackingMethods = [
+    "App", "Journal", "Spreadsheet", "Photos", "Measurements",
+    "Performance Metrics", "Body Composition", "Clothing Fit"
+  ];
+
+  const dietaryRestrictions = [
+    "Vegetarian", "Vegan", "Gluten-Free", "Dairy-Free", "Kosher",
+    "Halal", "Paleo", "Keto", "Low-Carb", "Low-Fat", "Pescatarian"
+  ];
+
+  const supplements = [
+    "Protein", "Creatine", "BCAAs", "Pre-Workout", "Multivitamin",
+    "Omega-3", "Vitamin D", "Magnesium", "Zinc", "Caffeine", "None"
+  ];
+
+  const recoveryActivities = [
+    "Foam Rolling", "Massage", "Sauna", "Cold Therapy", "Hot Bath",
+    "Meditation", "Yoga", "Walking", "Swimming", "Stretching"
+  ];
+
+  const sleepQualities = [
+    "Poor", "Fair", "Good", "Excellent"
+  ];
+
+  const stressLevels = [
+    "Low", "Moderate", "High", "Very High"
+  ];
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 py-8 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-6xl mx-auto">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="text-center mb-8"
+        >
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Advanced Workout Plan Generator</h1>
+          <p className="text-gray-600">Get a fully customized training program tailored to your unique physiology, goals, and lifestyle</p>
+        </motion.div>
+
+        <Tabs 
+          value={activeTab} 
+          onValueChange={setActiveTab}
+          className="bg-white rounded-xl shadow-lg overflow-hidden"
+        >
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="generate">Generate Plan</TabsTrigger>
+            <TabsTrigger value="saved">Saved Plans</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="generate" className="p-6">
+            <div className="space-y-8">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-xl">Basic Information</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <Label>Plan Title</Label>
+                    <Input
+                      name="planTitle"
+                      value={formData.planTitle}
+                      onChange={handleInputChange}
+                      placeholder="e.g., 'Summer Shred Program' or 'Strength Foundation Phase'"
+                    />
+                  </div>
+                  <div>
+                    <Label>Additional Notes</Label>
+                    <Textarea
+                      placeholder="Describe your specific goals, preferences, injuries, or any special requirements in detail..."
+                      value={prompt}
+                      onChange={(e) => setPrompt(e.target.value)}
+                      className="min-h-[120px]"
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-xl">Body Metrics</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label>Age</Label>
+                        <Input 
+                          name="age" 
+                          value={formData.age} 
+                          onChange={handleInputChange} 
+                          type="number" 
+                        />
+                      </div>
+                      <div>
+                        <Label>Sex</Label>
+                        <Select 
+                          value={formData.sex} 
+                          onValueChange={(value) => handleSelectChange('sex', value)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select sex" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="male">Male</SelectItem>
+                            <SelectItem value="female">Female</SelectItem>
+                            <SelectItem value="other">Other</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label>Height (cm)</Label>
+                        <Input 
+                          name="height" 
+                          value={formData.height} 
+                          onChange={handleInputChange} 
+                        />
+                      </div>
+                      <div>
+                        <Label>Weight (kg)</Label>
+                        <Input 
+                          name="weight" 
+                          value={formData.weight} 
+                          onChange={handleInputChange} 
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label>Body Fat %</Label>
+                        <Input 
+                          name="bodyFat" 
+                          value={formData.bodyFat} 
+                          onChange={handleInputChange} 
+                        />
+                      </div>
+                      <div>
+                        <Label>Muscle Mass (kg)</Label>
+                        <Input 
+                          name="muscleMass" 
+                          value={formData.muscleMass} 
+                          onChange={handleInputChange} 
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label>Waist Circumference (cm)</Label>
+                        <Input 
+                          name="waistCircumference" 
+                          value={formData.waistCircumference} 
+                          onChange={handleInputChange} 
+                        />
+                      </div>
+                      <div>
+                        <Label>Hip Circumference (cm)</Label>
+                        <Input 
+                          name="hipCircumference" 
+                          value={formData.hipCircumference} 
+                          onChange={handleInputChange} 
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label>Resting Heart Rate (bpm)</Label>
+                        <Input 
+                          name="restingHeartRate" 
+                          value={formData.restingHeartRate} 
+                          onChange={handleInputChange} 
+                        />
+                      </div>
+                      <div>
+                        <Label>Blood Pressure (mmHg)</Label>
+                        <Input 
+                          name="bloodPressure" 
+                          value={formData.bloodPressure} 
+                          onChange={handleInputChange} 
+                          placeholder="e.g., 120/80"
+                        />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-xl">Fitness Profile</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div>
+                      <Label>Experience Level</Label>
+                      <Select 
+                        value={formData.experienceLevel} 
+                        onValueChange={(value) => handleSelectChange('experienceLevel', value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select level" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {experienceLevels.map(level => (
+                            <SelectItem key={level} value={level.toLowerCase()}>{level}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Primary Goal</Label>
+                      <Select 
+                        value={formData.primaryGoal} 
+                        onValueChange={(value) => handleSelectChange('primaryGoal', value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select goal" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {goalOptions.map(goal => (
+                            <SelectItem key={goal} value={goal.toLowerCase().replace(' ', '-')}>{goal}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Secondary Goals</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {goalOptions.map(goal => (
+                          <Badge 
+                            key={goal}
+                            variant={formData.secondaryGoals.includes(goal) ? 'default' : 'outline'}
+                            className="cursor-pointer"
+                            onClick={() => handleMultiSelectChange('secondaryGoals', goal)}
+                          >
+                            {goal}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <Label>Target Areas</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {targetAreaOptions.map(area => (
+                          <Badge 
+                            key={area}
+                            variant={formData.targetAreas.includes(area) ? 'default' : 'outline'}
+                            className="cursor-pointer"
+                            onClick={() => handleMultiSelectChange('targetAreas', area)}
+                          >
+                            {area}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <Label>Areas to Avoid</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {targetAreaOptions.map(area => (
+                          <Badge 
+                            key={area}
+                            variant={formData.avoidAreas.includes(area) ? 'default' : 'outline'}
+                            className="cursor-pointer"
+                            onClick={() => handleMultiSelectChange('avoidAreas', area)}
+                          >
+                            {area}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <Label>Injuries/Conditions</Label>
+                      <Input 
+                        name="injuries" 
+                        value={formData.injuries.join(', ')} 
+                        onChange={(e) => setFormData({...formData, injuries: e.target.value.split(',').map(i => i.trim())})}
+                        placeholder="e.g., Rotator cuff tear, Lower back pain"
+                      />
+                    </div>
+                    <div>
+                      <Label>Medical Conditions</Label>
+                      <Input 
+                        name="medicalConditions" 
+                        value={formData.medicalConditions.join(', ')} 
+                        onChange={(e) => setFormData({...formData, medicalConditions: e.target.value.split(',').map(i => i.trim())})}
+                        placeholder="e.g., Hypertension, Diabetes"
+                      />
+                    </div>
+                    <div>
+                      <Label>Current Fitness Level</Label>
+                      <Textarea 
+                        name="currentFitnessLevel" 
+                        value={formData.currentFitnessLevel} 
+                        onChange={handleInputChange}
+                        placeholder="Describe your current fitness capabilities"
+                      />
+                    </div>
+                    <div>
+                      <Label>Workout History</Label>
+                      <Textarea 
+                        name="workoutHistory" 
+                        value={formData.workoutHistory} 
+                        onChange={handleInputChange}
+                        placeholder="What types of workouts have you done in the past?"
+                      />
+                    </div>
+                    <div>
+                      <Label>Recent Performance</Label>
+                      <Textarea 
+                        name="recentPerformance" 
+                        value={formData.recentPerformance} 
+                        onChange={handleInputChange}
+                        placeholder="Any recent PRs, achievements, or struggles?"
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-xl">Equipment Availability</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                    <div className="flex items-center space-x-2">
+                      <Switch 
+                        id="homeGym" 
+                        checked={formData.homeGym} 
+                        onCheckedChange={(checked) => handleToggleChange('homeGym', checked)} 
+                      />
+                      <Label htmlFor="homeGym">Home Gym</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Switch 
+                        id="resistanceBands" 
+                        checked={formData.resistanceBands} 
+                        onCheckedChange={(checked) => handleToggleChange('resistanceBands', checked)} 
+                      />
+                      <Label htmlFor="resistanceBands">Resistance Bands</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Switch 
+                        id="dumbbells" 
+                        checked={formData.dumbbells} 
+                        onCheckedChange={(checked) => handleToggleChange('dumbbells', checked)} 
+                      />
+                      <Label htmlFor="dumbbells">Dumbbells</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Switch 
+                        id="barbell" 
+                        checked={formData.barbell} 
+                        onCheckedChange={(checked) => handleToggleChange('barbell', checked)} 
+                      />
+                      <Label htmlFor="barbell">Barbell</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Switch 
+                        id="kettlebells" 
+                        checked={formData.kettlebells} 
+                        onCheckedChange={(checked) => handleToggleChange('kettlebells', checked)} 
+                      />
+                      <Label htmlFor="kettlebells">Kettlebells</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Switch 
+                        id="pullUpBar" 
+                        checked={formData.pullUpBar} 
+                        onCheckedChange={(checked) => handleToggleChange('pullUpBar', checked)} 
+                      />
+                      <Label htmlFor="pullUpBar">Pull-up Bar</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Switch 
+                        id="cardioMachine" 
+                        checked={formData.cardioMachine} 
+                        onCheckedChange={(checked) => handleToggleChange('cardioMachine', checked)} 
+                      />
+                      <Label htmlFor="cardioMachine">Cardio Machine</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Switch 
+                        id="weightMachine" 
+                        checked={formData.weightMachine} 
+                        onCheckedChange={(checked) => handleToggleChange('weightMachine', checked)} 
+                      />
+                      <Label htmlFor="weightMachine">Weight Machine</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Switch 
+                        id="cableMachine" 
+                        checked={formData.cableMachine} 
+                        onCheckedChange={(checked) => handleToggleChange('cableMachine', checked)} 
+                      />
+                      <Label htmlFor="cableMachine">Cable Machine</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Switch 
+                        id="yogaMat" 
+                        checked={formData.yogaMat} 
+                        onCheckedChange={(checked) => handleToggleChange('yogaMat', checked)} 
+                      />
+                      <Label htmlFor="yogaMat">Yoga Mat</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Switch 
+                        id="stabilityBall" 
+                        checked={formData.stabilityBall} 
+                        onCheckedChange={(checked) => handleToggleChange('stabilityBall', checked)} 
+                      />
+                      <Label htmlFor="stabilityBall">Stability Ball</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Switch 
+                        id="foamRoller" 
+                        checked={formData.foamRoller} 
+                        onCheckedChange={(checked) => handleToggleChange('foamRoller', checked)} 
+                      />
+                      <Label htmlFor="foamRoller">Foam Roller</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Switch 
+                        id="trx" 
+                        checked={formData.trx} 
+                        onCheckedChange={(checked) => handleToggleChange('trx', checked)} 
+                      />
+                      <Label htmlFor="trx">TRX</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Switch 
+                        id="medicineBall" 
+                        checked={formData.medicineBall} 
+                        onCheckedChange={(checked) => handleToggleChange('medicineBall', checked)} 
+                      />
+                      <Label htmlFor="medicineBall">Medicine Ball</Label>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-xl">Workout Preferences</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <Label>Preferred Workout Time</Label>
+                      <Select 
+                        value={formData.workoutTime} 
+                        onValueChange={(value) => handleSelectChange('workoutTime', value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select time" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {workoutTimes.map(time => (
+                            <SelectItem key={time} value={time.toLowerCase()}>{time}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Days Per Week</Label>
+                      <Input 
+                        name="daysPerWeek" 
+                        value={formData.daysPerWeek} 
+                        onChange={handleInputChange} 
+                        type="number" 
+                        min="1"
+                        max="7"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <Label>Preferred Intensity</Label>
+                    <Select 
+                      value={formData.intensity} 
+                      onValueChange={(value) => handleSelectChange('intensity', value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select intensity" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {intensityLevels.map(level => (
+                          <SelectItem key={level} value={level.toLowerCase()}>{level}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Favorite Exercises</Label>
+                    <Input 
+                      name="favoriteExercises" 
+                      value={formData.favoriteExercises} 
+                      onChange={handleInputChange} 
+                      placeholder="e.g., Squats, Bench Press, Pull-ups, Deadlifts"
+                    />
+                  </div>
+                  <div>
+                    <Label>Exercises to Avoid</Label>
+                    <Input 
+                      name="dislikedExercises" 
+                      value={formData.dislikedExercises} 
+                      onChange={handleInputChange} 
+                      placeholder="e.g., Burpees, Leg Press, Upright Rows"
+                    />
+                  </div>
+                  <div>
+                    <Label>Preferred Training Style</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {trainingStyles.map(style => (
+                        <Badge 
+                          key={style}
+                          variant={formData.preferredTrainingStyle.includes(style) ? 'default' : 'outline'}
+                          className="cursor-pointer"
+                          onClick={() => handleMultiSelectChange('preferredTrainingStyle', style)}
+                        >
+                          {style}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <Label>Workout Environment</Label>
+                    <Select 
+                      value={formData.workoutEnvironment} 
+                      onValueChange={(value) => handleSelectChange('workoutEnvironment', value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select environment" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {workoutEnvironments.map(env => (
+                          <SelectItem key={env} value={env.toLowerCase()}>{env}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Music Preference</Label>
+                    <Select 
+                      value={formData.musicPreference} 
+                      onValueChange={(value) => handleSelectChange('musicPreference', value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select preference" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {musicPreferences.map(music => (
+                          <SelectItem key={music} value={music.toLowerCase()}>{music}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Switch 
+                      id="trainingPartner" 
+                      checked={formData.trainingPartner} 
+                      onCheckedChange={(checked) => handleToggleChange('trainingPartner', checked)} 
+                    />
+                    <Label htmlFor="trainingPartner">Do you train with a partner?</Label>
+                  </div>
+                  <div>
+                    <Label>Progress Tracking Method</Label>
+                    <Select 
+                      value={formData.progressTrackingMethod} 
+                      onValueChange={(value) => handleSelectChange('progressTrackingMethod', value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select method" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {trackingMethods.map(method => (
+                          <SelectItem key={method} value={method.toLowerCase().replace(' ', '-')}>{method}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-xl">Weekly Schedule Preferences</CardTitle>
+                  <p className="text-sm text-muted-foreground">Indicate your preferred workout focus for each day</p>
+                </CardHeader>
+                <CardContent className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4">
+                  <div>
+                    <Label>Monday</Label>
+                    <Input 
+                      name="day1" 
+                      value={formData.day1} 
+                      onChange={handleInputChange}
+                      placeholder="e.g., Upper Body"
+                    />
+                  </div>
+                  <div>
+                    <Label>Tuesday</Label>
+                    <Input 
+                      name="day2" 
+                      value={formData.day2} 
+                      onChange={handleInputChange}
+                      placeholder="e.g., Lower Body"
+                    />
+                  </div>
+                  <div>
+                    <Label>Wednesday</Label>
+                    <Input 
+                      name="day3" 
+                      value={formData.day3} 
+                      onChange={handleInputChange}
+                      placeholder="e.g., Cardio"
+                    />
+                  </div>
+                  <div>
+                    <Label>Thursday</Label>
+                    <Input 
+                      name="day4" 
+                      value={formData.day4} 
+                      onChange={handleInputChange}
+                      placeholder="e.g., Push"
+                    />
+                  </div>
+                  <div>
+                    <Label>Friday</Label>
+                    <Input 
+                      name="day5" 
+                      value={formData.day5} 
+                      onChange={handleInputChange}
+                      placeholder="e.g., Pull"
+                    />
+                  </div>
+                  <div>
+                    <Label>Saturday</Label>
+                    <Input 
+                      name="day6" 
+                      value={formData.day6} 
+                      onChange={handleInputChange}
+                      placeholder="e.g., Legs"
+                    />
+                  </div>
+                  <div>
+                    <Label>Sunday</Label>
+                    <Input 
+                      name="day7" 
+                      value={formData.day7} 
+                      onChange={handleInputChange}
+                      placeholder="e.g., Active Recovery"
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-xl">Nutrition Preferences</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div>
+                      <Label>Dietary Restrictions</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {dietaryRestrictions.map(restriction => (
+                          <Badge 
+                            key={restriction}
+                            variant={formData.dietaryRestrictions.includes(restriction) ? 'default' : 'outline'}
+                            className="cursor-pointer"
+                            onClick={() => handleMultiSelectChange('dietaryRestrictions', restriction)}
+                          >
+                            {restriction}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <Label>Supplements</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {supplements.map(supp => (
+                          <Badge 
+                            key={supp}
+                            variant={formData.supplements.includes(supp) ? 'default' : 'outline'}
+                            className="cursor-pointer"
+                            onClick={() => handleMultiSelectChange('supplements', supp)}
+                          >
+                            {supp}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <Label>Meal Timing</Label>
+                      <Select 
+                        value={formData.mealTiming} 
+                        onValueChange={(value) => handleSelectChange('mealTiming', value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select timing" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="regular">Regular Meals</SelectItem>
+                          <SelectItem value="intermittent-fasting">Intermittent Fasting</SelectItem>
+                          <SelectItem value="small-frequent">Small Frequent Meals</SelectItem>
+                          <SelectItem value="custom">Custom Schedule</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Hydration Level</Label>
+                      <Select 
+                        value={formData.hydrationLevel} 
+                        onValueChange={(value) => handleSelectChange('hydrationLevel', value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select level" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="low">Low (Need Improvement)</SelectItem>
+                          <SelectItem value="moderate">Moderate</SelectItem>
+                          <SelectItem value="high">High (Optimal)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-xl">Recovery Preferences</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div>
+                      <Label>Sleep Quality</Label>
+                      <Select 
+                        value={formData.sleepQuality} 
+                        onValueChange={(value) => handleSelectChange('sleepQuality', value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select quality" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {sleepQualities.map(quality => (
+                            <SelectItem key={quality} value={quality.toLowerCase()}>{quality}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Sleep Duration (hours/night)</Label>
+                      <Slider
+                        defaultValue={[7]}
+                        min={4}
+                        max={10}
+                        step={0.5}
+                        onValueChange={(value:any) => handleSliderChange('sleepDuration', value)}
+                      />
+                      <div className="text-center mt-2">{formData.sleepDuration || 7} hours</div>
+                    </div>
+                    <div>
+                      <Label>Stress Level</Label>
+                      <Select 
+                        value={formData.stressLevel} 
+                        onValueChange={(value) => handleSelectChange('stressLevel', value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select level" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {stressLevels.map(level => (
+                            <SelectItem key={level} value={level.toLowerCase().replace(' ', '-')}>{level}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Recovery Activities</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {recoveryActivities.map(activity => (
+                          <Badge 
+                            key={activity}
+                            variant={formData.recoveryActivities.includes(activity) ? 'default' : 'outline'}
+                            className="cursor-pointer"
+                            onClick={() => handleMultiSelectChange('recoveryActivities', activity)}
+                          >
+                            {activity}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <Label>Stretching Routine</Label>
+                      <Select 
+                        value={formData.stretchingRoutine} 
+                        onValueChange={(value) => handleSelectChange('stretchingRoutine', value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select routine" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">None</SelectItem>
+                          <SelectItem value="basic">Basic (5-10 min)</SelectItem>
+                          <SelectItem value="moderate">Moderate (15-20 min)</SelectItem>
+                          <SelectItem value="extensive">Extensive (30+ min)</SelectItem>
+                          <SelectItem value="yoga">Yoga-Based</SelectItem>
+                          <SelectItem value="mobility">Mobility Focused</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <Button
+                onClick={handleGenerate}
+                disabled={loading}
+                className="w-full py-6 text-lg"
+              >
+                {loading ? (
+                  <Icons.spinner className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Icons.dumbbell  />
+                )}
+                Generate Comprehensive Workout Plan
+              </Button>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="saved" className="p-6">
+            {savedPlans.length === 0 ? (
+              <div className="text-center py-12">
+                <Icons.fileWarning className="mx-auto h-12 w-12 text-gray-400" />
+                <h3 className="mt-4 text-lg font-medium text-gray-900">No saved plans yet</h3>
+                <p className="mt-1 text-sm text-gray-500">Generate your first workout plan to get started.</p>
+                <Button 
+                  onClick={() => setActiveTab('generate')} 
+                  className="mt-6"
+                >
+                  Generate Plan
+                </Button>
+              </div>
+            ) : (
+              <ScrollArea className="h-[600px]">
+                <div className="space-y-4">
+                  {savedPlans.map((plan) => (
+                    <Card key={plan.id} className="hover:shadow-md transition-shadow">
+                      <CardHeader className="flex flex-row justify-between items-start space-y-0 pb-2">
+                        <div>
+                          <CardTitle>
+                            {plan.title || `Workout Plan ${format(new Date(plan.date), 'MMM d, yyyy')}`}
+                          </CardTitle>
+                          <div className="flex gap-2 mt-2">
+                            {plan.fitnessProfile?.primaryGoal && (
+                              <Badge variant="outline">
+                                {plan.fitnessProfile.primaryGoal}
+                              </Badge>
+                            )}
+                            {plan.duration && (
+                              <Badge variant="secondary">
+                                {plan.duration} min
+                              </Badge>
+                            )}
+                            {plan.preferences?.intensity && (
+                              <Badge variant="secondary">
+                                {plan.preferences.intensity}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDelete(plan.id)}
+                          className="text-red-500 hover:text-red-700"
+                        >
+                          <Icons.trash className="h-4 w-4" />
+                        </Button>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-3">
+                          {plan.exercises.slice(0, 3).map((exercise, idx) => (
+                            <div key={idx} className="border-l-4 border-primary pl-3 py-1">
+                              <h4 className="font-medium">{exercise.exercise_name}</h4>
+                              <p className="text-sm text-gray-600">
+                                {exercise.sets} sets × {exercise.reps} reps @ {exercise.weight}kg
+                                {exercise.rest && ` • Rest: ${exercise.rest}`}
+                                {exercise.rpe && ` • RPE: ${exercise.rpe}`}
+                              </p>
+                            </div>
+                          ))}
+                          {plan.exercises.length > 3 && (
+                            <div className="text-sm text-muted-foreground">
+                              + {plan.exercises.length - 3} more exercises
+                            </div>
+                          )}
+                        </div>
+                        {plan.notes && (
+                          <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+                            <h4 className="font-medium text-sm">Notes</h4>
+                            <p className="text-sm text-gray-600">{plan.notes}</p>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </ScrollArea>
+            )}
+          </TabsContent>
+        </Tabs>
+
+        {workoutPlan && !showModal && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-8"
+          >
+            <Card className="border-primary">
+              <CardHeader>
+                <CardTitle className="text-2xl">
+                  {workoutPlan.title || 'Your Personalized Workout Plan'}
+                </CardTitle>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {workoutPlan.duration && (
+                    <Badge variant="secondary">
+                      <Icons.clock className="h-3 w-3 mr-1" />
+                      {workoutPlan.duration} min
+                    </Badge>
+                  )}
+                  {workoutPlan.fitnessProfile?.primaryGoal && (
+                    <Badge>
+                      <Icons.target className="h-3 w-3 mr-1" />
+                      {workoutPlan.fitnessProfile.primaryGoal}
+                    </Badge>
+                  )}
+                  {workoutPlan.preferences?.intensity && (
+                    <Badge variant="outline">
+                      <Icons.activity className="h-3 w-3 mr-1" />
+                      {workoutPlan.preferences.intensity}
+                    </Badge>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-6">
+                  {workoutPlan.weeklySchedule && (
+                    <div className="p-4 bg-blue-50 rounded-lg">
+                      <h3 className="font-semibold mb-2">Weekly Schedule</h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-2">
+                        {workoutPlan.weeklySchedule.day1 && (
+                          <div className="bg-white p-2 rounded">
+                            <h4 className="font-medium text-sm">Monday</h4>
+                            <p className="text-xs">{workoutPlan.weeklySchedule.day1}</p>
+                          </div>
+                        )}
+                        {workoutPlan.weeklySchedule.day2 && (
+                          <div className="bg-white p-2 rounded">
+                            <h4 className="font-medium text-sm">Tuesday</h4>
+                            <p className="text-xs">{workoutPlan.weeklySchedule.day2}</p>
+                          </div>
+                        )}
+                        {workoutPlan.weeklySchedule.day3 && (
+                          <div className="bg-white p-2 rounded">
+                            <h4 className="font-medium text-sm">Wednesday</h4>
+                            <p className="text-xs">{workoutPlan.weeklySchedule.day3}</p>
+                          </div>
+                        )}
+                        {workoutPlan.weeklySchedule.day4 && (
+                          <div className="bg-white p-2 rounded">
+                            <h4 className="font-medium text-sm">Thursday</h4>
+                            <p className="text-xs">{workoutPlan.weeklySchedule.day4}</p>
+                          </div>
+                        )}
+                        {workoutPlan.weeklySchedule.day5 && (
+                          <div className="bg-white p-2 rounded">
+                            <h4 className="font-medium text-sm">Friday</h4>
+                            <p className="text-xs">{workoutPlan.weeklySchedule.day5}</p>
+                          </div>
+                        )}
+                        {workoutPlan.weeklySchedule.day6 && (
+                          <div className="bg-white p-2 rounded">
+                            <h4 className="font-medium text-sm">Saturday</h4>
+                            <p className="text-xs">{workoutPlan.weeklySchedule.day6}</p>
+                          </div>
+                        )}
+                        {workoutPlan.weeklySchedule.day7 && (
+                          <div className="bg-white p-2 rounded">
+                            <h4 className="font-medium text-sm">Sunday</h4>
+                            <p className="text-xs">{workoutPlan.weeklySchedule.day7}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="space-y-4">
+                    <h3 className="font-semibold">Workout Details</h3>
+                    {workoutPlan.exercises.map((exercise, idx) => (
+                      <div key={idx} className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Icons.dumbbell />
+                          <h4 className="text-lg font-semibold">{exercise.exercise_name}</h4>
+                        </div>
+                        <div className="pl-6 space-y-1">
+                          <p className="flex items-center gap-2">
+                            <Icons.repeat className="h-3 w-3 text-muted-foreground" />
+                            <span>{exercise.sets} sets × {exercise.reps} reps</span>
+                          </p>
+                          {exercise.weight > 0 && (
+                            <p className="flex items-center gap-2">
+                              <Icons.weight className="h-3 w-3 text-muted-foreground" />
+                              <span>{exercise.weight} kg</span>
+                            </p>
+                          )}
+                          {exercise.rest && (
+                            <p className="flex items-center gap-2">
+                              <Icons.clock className="h-3 w-3 text-muted-foreground" />
+                              <span>Rest: {exercise.rest}</span>
+                            </p>
+                          )}
+                          {exercise.rpe && (
+                            <p className="flex items-center gap-2">
+                              <Icons.gauge className="h-3 w-3 text-muted-foreground" />
+                              <span>RPE: {exercise.rpe}</span>
+                            </p>
+                          )}
+                          {exercise.tempo && (
+                            <p className="flex items-center gap-2">
+                              <Icons.timer className="h-3 w-3 text-muted-foreground" />
+                              <span>Tempo: {exercise.tempo}</span>
+                            </p>
+                          )}
+                          {exercise.superset && (
+                            <p className="flex items-center gap-2">
+                              <Icons.link className="h-3 w-3 text-muted-foreground" />
+                              <span>Superset with: {exercise.superset}</span>
+                            </p>
+                          )}
+                          {exercise.notes && (
+                            <p className="text-sm text-muted-foreground mt-1 pl-2 border-l-2 border-gray-200">
+                              {exercise.notes}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  
+                  {workoutPlan.notes && (
+                    <div className="mt-6 p-4 bg-blue-50 rounded-lg">
+                      <h4 className="font-medium flex items-center gap-2 mb-2">
+                        <Icons.info className="h-4 w-4" />
+                        Trainer Notes
+                      </h4>
+                      <p className="text-sm">{workoutPlan.notes}</p>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+              <CardFooter className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setWorkoutPlan(null)}>
+                  Close
+                </Button>
+                <Button onClick={handleSave} disabled={saving}>
+                  {saving ? (
+                    <Icons.spinner className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Icons.save className="mr-2 h-4 w-4" />
+                  )}
+                  Save Plan
+                </Button>
+              </CardFooter>
+            </Card>
+          </motion.div>
+        )}
+      </div>
+
+      <AnimatePresence>
+        {showModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl max-w-md w-full p-6 text-center"
+            >
+              <div className="flex justify-center mb-6">
+                <div className="relative">
+                  <Icons.heart className="h-12 w-12 text-primary animate-pulse" />
+                  <Icons.dumbbell  />
+                </div>
+              </div>
+              
+              <h3 className="text-xl font-bold mb-2">Crafting Your Perfect Plan</h3>
+              <p className="text-gray-600 mb-6">
+                Our advanced fitness AI is analyzing all your inputs to design a completely personalized workout routine.
+                This typically takes 1-3 minutes.
+              </p>
+              
+              <div className="mb-6">
+                <div className="flex justify-between text-sm text-gray-500 mb-1">
+                  <span>Estimated time remaining</span>
+                  <span>{formatTime(countdown)}</span>
+                </div>
+                <Progress 
+                  value={(1 - countdown/180) * 100} 
+                  className="h-2" 
+                />
+              </div>
+              
+              <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 text-left">
+                <div className="flex items-start gap-3">
+                  <Icons.lightbulb className="h-5 w-5 text-blue-500 mt-0.5 flex-shrink-0" />
+                  <p className="text-sm text-blue-800 dark:text-blue-200">
+                    While you wait, consider doing some dynamic stretches or foam rolling. Proper warm-up enhances performance and reduces injury risk.
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+export default WorkoutGenerator;

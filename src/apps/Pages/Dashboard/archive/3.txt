@@ -1,0 +1,661 @@
+'use client';
+
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
+import { format, formatDistanceToNow } from 'date-fns';
+import { useState } from 'react';
+import dayjs, { Dayjs } from 'dayjs';
+import { motion } from 'framer-motion';
+import { LineChart, BarChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+
+// shadcn/ui components
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+  CardFooter,
+} from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Badge } from '@/components/ui/badge';
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '@/components/ui/tabs';
+import { Toast } from '@/components/ui/use-toast';
+
+
+
+import { Separator } from '@/components/ui/separator';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet';
+import { Icons } from '@/components/icons';
+import { DateRangePicker } from '@/components/ui/date-range-picker';
+
+interface Workout {
+  _id: string;
+  exercise_name: string;
+  sets: number;
+  reps: number;
+  weight?: number;
+  exercise_date: string;
+  workout_type?: string;
+  muscle_group?: string;
+  duration?: number;
+}
+
+interface DashboardData {
+  metrics: {
+    totalWorkouts: number;
+    totalSets: number;
+    totalReps: number;
+    averageWeight: number | null;
+    totalDuration: number;
+  };
+  weeklyMetrics: {
+    totalWorkouts: number;
+    totalSets: number;
+    totalWeight: number;
+  };
+  monthlyMetrics: {
+    totalWorkouts: number;
+    totalSets: number;
+    totalWeight: number;
+  };
+  weightProgression: { date: string; weight: number }[];
+  workoutFrequency: { date: string; types: { type: string; count: number }[] }[];
+  recentWorkouts: Workout[];
+  exercises: string[];
+}
+
+const CHART_COLORS = [
+  '#3b82f6', // blue-500
+  '#10b981', // emerald-500
+  '#f59e0b', // amber-500
+  '#ef4444', // red-500
+  '#8b5cf6', // violet-500
+  '#ec4899', // pink-500
+  '#14b8a6', // teal-500
+];
+
+export default function Dashboard() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+  const [filters, setFilters] = useState({
+    dateRange: undefined as { from: Date; to: Date } | undefined,
+    exerciseName: undefined as string | undefined,
+    stackBy: 'workout_type' as 'workout_type' | 'muscle_group',
+  });
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  if (!token && typeof window !== 'undefined') {
+    Toast({
+      title: 'Authentication required',
+      // description: 'Please login to view dashboard',
+      variant: 'destructive',
+    });
+    navigate('/login');
+    return null;
+  }
+
+  const { data, isLoading, error } = useQuery<DashboardData, Error>({
+    queryKey: ['dashboard', token, filters],
+    queryFn: async () => {
+      try {
+        const params = new URLSearchParams();
+        if (filters.dateRange) {
+          params.append('date_start', dayjs(filters.dateRange.from).format('YYYY-MM-DD'));
+          params.append('date_end', dayjs(filters.dateRange.to).format('YYYY-MM-DD'));
+        }
+        if (filters.exerciseName) params.append('exercise_name', filters.exerciseName);
+        params.append('stack_by', filters.stackBy);
+
+        const res = await axios.get(`/api/dashboard?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        return res.data;
+      } catch (err: any) {
+        if (err.response?.status === 401 || err.response?.status === 403) {
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('token');
+          }
+          navigate('/login');
+          Toast({
+            title: 'Session expired',
+            // description: 'Please login again',
+            variant: 'destructive',
+          });
+        }
+        throw err;
+      }
+    },
+    retry: 1,
+    staleTime: 1000 * 60 * 5, // 5 minutes
+  });
+
+  const handleLogout = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('token');
+    }
+    queryClient.clear();
+    navigate('/login');
+    Toast({
+      title: 'Logged out successfully',
+      // description: 'See you soon!',
+    });
+  };
+
+  const chartData = data?.workoutFrequency.map((item) => {
+    const result: any = { date: format(new Date(item.date), 'MMM dd') };
+    item.types.forEach((type) => {
+      result[type.type || 'Unknown'] = type.count;
+    });
+    return result;
+  }) || [];
+
+  const types = Array.from(
+    new Set(data?.workoutFrequency.flatMap((item) => item.types.map((t) => t.type || 'Unknown')))
+  );
+
+  const weightChartData = data?.weightProgression.map(item => ({
+    ...item,
+    date: format(new Date(item.date), 'MMM dd')
+  })) || [];
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Mobile Navigation */}
+      <header className="lg:hidden sticky top-0 z-40 border-b bg-background">
+        <div className="container flex h-16 items-center justify-between px-4">
+          <div className="flex items-center gap-2">
+            <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+              <SheetTrigger asChild>
+                <Button variant="ghost" size="icon">
+                  <Icons.menu className="h-5 w-5" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="left" className="w-[280px]">
+                <SheetHeader>
+                  <SheetTitle className="flex items-center gap-2">
+                    <Icons.dumbbell  />
+                    <span>FitTrack</span>
+                  </SheetTitle>
+                </SheetHeader>
+                <nav className="mt-6 flex flex-col gap-1">
+                  <Button
+                    variant="ghost"
+                    className="w-full justify-start"
+                    onClick={() => {
+                      navigate('/dashboard');
+                      setMobileMenuOpen(false);
+                    }}
+                  >
+                    <Icons.home className="mr-2 h-4 w-4" />
+                    Dashboard
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    className="w-full justify-start"
+                    onClick={() => {
+                      navigate('/gym-notes');
+                      setMobileMenuOpen(false);
+                    }}
+                  >
+                    <Icons.plus className="mr-2 h-4 w-4" />
+                    Add Workout
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    className="w-full justify-start"
+                    onClick={() => {
+                      navigate('/workout-summary');
+                      setMobileMenuOpen(false);
+                    }}
+                  >
+                    <Icons.barChart className="mr-2 h-4 w-4" />
+                    Workout Summary
+                  </Button>
+                  <Separator className="my-2" />
+                  <Button
+                    variant="ghost"
+                    className="w-full justify-start text-destructive"
+                    onClick={() => {
+                      handleLogout();
+                      setMobileMenuOpen(false);
+                    }}
+                  >
+                    <Icons.logout className="mr-2 h-4 w-4" />
+                    Sign Out
+                  </Button>
+                </nav>
+              </SheetContent>
+            </Sheet>
+            <h1 className="text-lg font-semibold">Dashboard</h1>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate('/gym-notes')}
+          >
+            <Icons.plus className="mr-2 h-4 w-4" />
+            <span className="sr-only md:not-sr-only">Add Workout</span>
+          </Button>
+        </div>
+      </header>
+
+      {/* Desktop Navigation */}
+      <div className="hidden lg:flex fixed inset-y-0 left-0 z-40 w-64 border-r bg-background">
+        <div className="flex h-full flex-col">
+          <div className="flex h-16 items-center border-b px-6">
+            <div className="flex items-center gap-2 font-semibold">
+              <Icons.dumbbell />
+              <span>FitTrack</span>
+            </div>
+          </div>
+          <nav className="flex-1 space-y-1 p-2">
+            <Button
+              variant="ghost"
+              className="w-full justify-start"
+              onClick={() => navigate('/dashboard')}
+            >
+              <Icons.home className="mr-2 h-4 w-4" />
+              Dashboard
+            </Button>
+            <Button
+              variant="ghost"
+              className="w-full justify-start"
+              onClick={() => navigate('/gym-notes')}
+            >
+              <Icons.plus className="mr-2 h-4 w-4" />
+              Add Workout
+            </Button>
+            <Button
+              variant="ghost"
+              className="w-full justify-start"
+              onClick={() => navigate('/workout-summary')}
+            >
+              <Icons.barChart className="mr-2 h-4 w-4" />
+              Workout Summary
+            </Button>
+          </nav>
+          <div className="p-2">
+            <Button
+              variant="ghost"
+              className="w-full justify-start text-destructive"
+              onClick={handleLogout}
+            >
+              <Icons.logout className="mr-2 h-4 w-4" />
+              Sign Out
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <main className="lg:pl-64">
+        <div className="p-4 md:p-6">
+          {/* Filters */}
+          <Card className="mb-6">
+            <CardHeader>
+              <CardTitle className="text-lg">Filters</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                <div className="space-y-2">
+                  <Label htmlFor="date-range">Date Range</Label>
+                  <DateRangePicker
+                    selected={filters.dateRange}
+                    // onSelect={(range) => setFilters({ ...filters, dateRange: range })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="exercise">Exercise</Label>
+                  <Select
+                    value={filters.exerciseName}
+                    onValueChange={(value) => setFilters({ ...filters, exerciseName: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select exercise" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {data?.exercises.map((exercise) => (
+                        <SelectItem key={exercise} value={exercise}>
+                          {exercise}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="stack-by">Group By</Label>
+                  <div className="flex items-center gap-4">
+                    <Switch
+                      id="stack-by"
+                      checked={filters.stackBy === 'muscle_group'}
+                      onCheckedChange={(checked) =>
+                        setFilters({ ...filters, stackBy: checked ? 'muscle_group' : 'workout_type' })
+                      }
+                    />
+                    <Label htmlFor="stack-by">
+                      {filters.stackBy === 'muscle_group' ? 'Muscle Group' : 'Workout Type'}
+                    </Label>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {isLoading ? (
+            <div className="grid gap-6">
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <Skeleton key={i} className="h-32 rounded-lg" />
+                ))}
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                {Array.from({ length: 2 }).map((_, i) => (
+                  <Skeleton key={i} className="h-80 rounded-lg" />
+                ))}
+              </div>
+              <Skeleton className="h-96 rounded-lg" />
+            </div>
+          ) : error ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Error loading data</CardTitle>
+                <CardDescription>{error.message}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button
+                  onClick={() => queryClient.refetchQueries({ queryKey: ['dashboard'] })}
+                >
+                  Retry
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5 }}
+              className="space-y-6"
+            >
+              {/* Metrics Overview */}
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardDescription>Total Workouts</CardDescription>
+                    <CardTitle className="text-3xl">
+                      {data?.metrics.totalWorkouts || 0}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-xs text-muted-foreground">
+                      +{data?.weeklyMetrics.totalWorkouts || 0} this week
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardDescription>Total Sets</CardDescription>
+                    <CardTitle className="text-3xl">
+                      {data?.metrics.totalSets || 0}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-xs text-muted-foreground">
+                      +{data?.weeklyMetrics.totalSets || 0} this week
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardDescription>Total Reps</CardDescription>
+                    <CardTitle className="text-3xl">
+                      {data?.metrics.totalReps || 0}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-xs text-muted-foreground">
+                      ~{(data?.metrics.totalReps || 0) / (data?.metrics.totalSets || 1)} per set
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardDescription>Avg Weight</CardDescription>
+                    <CardTitle className="text-3xl">
+                      {data?.metrics.averageWeight ? data.metrics.averageWeight.toFixed(1) : 'N/A'}
+                      <span className="text-sm font-normal text-muted-foreground"> kg</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-xs text-muted-foreground">
+                      {data?.weeklyMetrics.totalWeight || 0} kg this week
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Charts */}
+              <div className="grid gap-4 md:grid-cols-2">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Weight Progression</CardTitle>
+                    <CardDescription>
+                      {filters.exerciseName || 'All exercises'}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="h-80">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={weightChartData}>
+                        <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                        <XAxis dataKey="date" fontSize={12} />
+                        <YAxis fontSize={12} />
+                        <Tooltip
+                          content={({ active, payload, label }) => {
+                            if (active && payload && payload.length) {
+                              return (
+                                <div className="rounded-lg border bg-background p-2 shadow-sm">
+                                  <div className="font-semibold">{label}</div>
+                                  <div className="text-sm">
+                                    {payload[0].value} kg
+                                  </div>
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="weight"
+                          stroke={CHART_COLORS[0]}
+                          strokeWidth={2}
+                          dot={{ r: 4 }}
+                          activeDot={{ r: 6 }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <CardTitle>Workout Frequency</CardTitle>
+                      <Badge variant="outline">
+                        {filters.stackBy === 'muscle_group' ? 'Muscle Group' : 'Workout Type'}
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="h-80">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={chartData}>
+                        <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                        <XAxis dataKey="date" fontSize={12} />
+                        <YAxis fontSize={12} />
+                        <Tooltip
+                          content={({ active, payload, label }) => {
+                            if (active && payload && payload.length) {
+                              return (
+                                <div className="rounded-lg border bg-background p-2 shadow-sm">
+                                  <div className="font-semibold">{label}</div>
+                                  {payload.map((item, idx) => (
+                                    <div key={idx} className="flex items-center gap-2 text-sm">
+                                      <div
+                                        className="h-3 w-3 rounded-full"
+                                        style={{ backgroundColor: item.color }}
+                                      />
+                                      {item.name}: {item.value}
+                                    </div>
+                                  ))}
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
+                        />
+                        {types.map((type, index) => (
+                          <Bar
+                            key={type}
+                            dataKey={type}
+                            stackId="a"
+                            fill={CHART_COLORS[index % CHART_COLORS.length]}
+                          />
+                        ))}
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Recent Workouts */}
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle>Recent Workouts</CardTitle>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => navigate('/workout-summary')}
+                    >
+                      View All
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Exercise</TableHead>
+                        <TableHead>Sets</TableHead>
+                        <TableHead>Reps</TableHead>
+                        <TableHead>Weight</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {data?.recentWorkouts?.slice(0, 5).map((workout) => (
+                        <TableRow key={workout._id}>
+                          <TableCell>
+                            {format(new Date(workout.exercise_date), 'MMM dd')}
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            {workout.exercise_name}
+                          </TableCell>
+                          <TableCell>{workout.sets}</TableCell>
+                          <TableCell>{workout.reps}</TableCell>
+                          <TableCell>
+                            {workout.weight ? `${workout.weight} kg` : '-'}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {!data?.recentWorkouts?.length && (
+                        <TableRow>
+                          <TableCell colSpan={5} className="text-center">
+                            No recent workouts found
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+
+              {/* Achievements */}
+              {data?.metrics && (
+                <div className="grid gap-4">
+                  {data.metrics.totalWorkouts >= 10 && (
+                    <Card className="border-emerald-500 bg-emerald-50">
+                      <CardHeader className="flex flex-row items-center gap-4 pb-2">
+                        <Avatar className="bg-emerald-100 text-emerald-600">
+                          <Icons.trophy className="h-5 w-5" />
+                        </Avatar>
+                        <div>
+                          <CardTitle className="text-lg">Workout Milestone</CardTitle>
+                          <CardDescription>
+                            You've completed {data.metrics.totalWorkouts} workouts!
+                          </CardDescription>
+                        </div>
+                      </CardHeader>
+                    </Card>
+                  )}
+                  {data.metrics.totalSets >= 100 && (
+                    <Card className="border-blue-500 bg-blue-50">
+                      <CardHeader className="flex flex-row items-center gap-4 pb-2">
+                        <Avatar className="bg-blue-100 text-blue-600">
+                          <Icons.flame className="h-5 w-5" />
+                        </Avatar>
+                        <div>
+                          <CardTitle className="text-lg">Powerhouse</CardTitle>
+                          <CardDescription>
+                            You've smashed {data.metrics.totalSets} sets!
+                          </CardDescription>
+                        </div>
+                      </CardHeader>
+                    </Card>
+                  )}
+                </div>
+              )}
+            </motion.div>
+          )}
+        </div>
+      </main>
+    </div>
+  );
+}
