@@ -3,6 +3,8 @@ import axios from 'axios';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Icons } from '@/components/icons';
 import { ChangePasswordForm } from '@/apps/Pages/ChangePasswordForm/ChangePasswordForm';
+import { Button } from '@/components/ui/button';
+import { useNavigate } from 'react-router-dom';
 
 interface UserProfile {
   username: string;
@@ -47,7 +49,13 @@ export function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
 
     fetchProfile();
   }, [isOpen]);
-
+  const navigate = useNavigate();
+  const [authenticated, setAuthenticated] = useState(false);
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    setAuthenticated(false);
+    navigate('/login');
+  };
   const initial = profile?.username?.charAt(0).toUpperCase() || '';
 
   const toggleSection = (section: string) => {
@@ -140,22 +148,20 @@ export function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
                 <div className="flex border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900">
                   <button
                     onClick={() => setActiveTab('profile')}
-                    className={`flex-1 py-4 px-6 font-medium text-base transition-colors ${
-                      activeTab === 'profile'
-                        ? 'text-primary border-b-2 border-primary bg-white dark:bg-gray-950'
-                        : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
-                    }`}
+                    className={`flex-1 py-4 px-6 font-medium text-base transition-colors ${activeTab === 'profile'
+                      ? 'text-primary border-b-2 border-primary bg-white dark:bg-gray-950'
+                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                      }`}
                     aria-selected={activeTab === 'profile'}
                   >
                     Profile
                   </button>
                   <button
                     onClick={() => setActiveTab('settings')}
-                    className={`flex-1 py-4 px-6 font-medium text-base transition-colors ${
-                      activeTab === 'settings'
-                        ? 'text-primary border-b-2 border-primary bg-white dark:bg-gray-950'
-                        : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
-                    }`}
+                    className={`flex-1 py-4 px-6 font-medium text-base transition-colors ${activeTab === 'settings'
+                      ? 'text-primary border-b-2 border-primary bg-white dark:bg-gray-950'
+                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                      }`}
                     aria-selected={activeTab === 'settings'}
                   >
                     Settings
@@ -174,7 +180,7 @@ export function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
                         </div>
                       </div>
                       <div className="flex items-center gap-4 p-4 bg-gray-50 dark:bg-gray-900 rounded-xl shadow-sm">
-                        <Icons.mail  />
+                        <Icons.mail />
                         <div>
                           <p className="text-sm text-gray-500 dark:text-gray-400">Email</p>
                           <p className="text-lg font-medium text-gray-800 dark:text-white">{profile.email}</p>
@@ -211,9 +217,8 @@ export function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
                             Change Password
                           </span>
                           <Icons.chevronDown
-                            className={`w-6 h-6 text-gray-400 transition-transform ${
-                              expandedSection === 'password' ? 'rotate-180' : ''
-                            }`}
+                            className={`w-6 h-6 text-gray-400 transition-transform ${expandedSection === 'password' ? 'rotate-180' : ''
+                              }`}
                           />
                         </button>
                         {expandedSection === 'password' && (
@@ -243,9 +248,8 @@ export function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
                             Notification Preferences
                           </span>
                           <Icons.chevronDown
-                            className={`w-6 h-6 text-gray-400 transition-transform ${
-                              expandedSection === 'notifications' ? 'rotate-180' : ''
-                            }`}
+                            className={`w-6 h-6 text-gray-400 transition-transform ${expandedSection === 'notifications' ? 'rotate-180' : ''
+                              }`}
                           />
                         </button>
                         {expandedSection === 'notifications' && (
@@ -292,9 +296,8 @@ export function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
                             Privacy Settings
                           </span>
                           <Icons.chevronDown
-                            className={`w-6 h-6 text-gray-400 transition-transform ${
-                              expandedSection === 'privacy' ? 'rotate-180' : ''
-                            }`}
+                            className={`w-6 h-6 text-gray-400 transition-transform ${expandedSection === 'privacy' ? 'rotate-180' : ''
+                              }`}
                           />
                         </button>
                         {expandedSection === 'privacy' && (
@@ -332,16 +335,24 @@ export function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
 
                 {/* Footer Actions */}
                 <div className="p-4 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 flex justify-end gap-3">
-                  <button
+                  <Button
                     onClick={onClose}
-                    className="px-6 py-3 text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-800 hover:bg-gray-300 dark:hover:bg-gray-700 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-primary"
+                    className="cursor-pointer px-6 py-3 text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-800 hover:bg-gray-300 dark:hover:bg-gray-700 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-primary"
                   >
                     Close
-                  </button>
+                  </Button>
+                  <Button
+                    
+                    onClick={handleLogout}
+                    className='cursor-pointer  '
+                  >
+                    <Icons.logout className="h-4 w-4" />
+                    Sign Out
+                  </Button>
                   {activeTab === 'profile' && (
-                    <button className="px-6 py-3 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors focus:outline-none focus:ring-2 focus:ring-primary">
+                    <Button className="cursor-pointer px-6 py-3 bg-primary  rounded-lg hover:bg-primary/90 transition-colors focus:outline-none focus:ring-2 focus:ring-primary">
                       Edit Profile
-                    </button>
+                    </Button>
                   )}
                 </div>
               </>

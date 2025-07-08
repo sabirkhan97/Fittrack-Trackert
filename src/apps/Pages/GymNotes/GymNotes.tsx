@@ -25,6 +25,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Icons } from '@/components/icons';
 import exercises from '@/apps/Pages/GymNotes/Data/exercises.json';
+import { SelectContent, SelectGroup, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const { Option } = Select;
 
@@ -51,7 +52,7 @@ const exerciseSchema = z.object({
 const formSchema = z.object({
   exercise_date: z.date({ required_error: 'Workout date is required' }),
   workout_type: z.enum(
-    ['Upper Body', 'Lower Body', 'Full Body','Push','Pull', 'Bro Split (Single Muscle)'],
+    ['Upper Body', 'Lower Body', 'Full Body', 'Push', 'Pull', 'Bro Split (Single Muscle)'],
     { required_error: 'Please select a workout type' }
   ),
   muscle_group: z.string().optional(),
@@ -147,8 +148,6 @@ export default function GymDetails() {
         console.error('Profile fetch error:', err);
       }
     };
-
-
 
     fetchProfile();
 
@@ -484,6 +483,7 @@ export default function GymDetails() {
                           </FormItem>
                         )}
                       />
+                    
                       {workoutType === 'Bro Split (Single Muscle)' && (
                         <FormField
                           control={form.control}

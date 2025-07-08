@@ -7,7 +7,7 @@
   "scripts": {
     "predeploy": "npm run build",
     "deploy": "gh-pages -d dist",
-    "dev": "vite --port 3000",
+    "dev": "vite --host --port 3000",
     "build": "tsc && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
